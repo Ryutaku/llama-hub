@@ -5,10 +5,11 @@ import java.time.LocalDateTime;
 
 
 @Data
-public class AdminUser {
+public class ModelPreset {
     private Long id;
-    private String username;
-    private String passwordHash;
+    private String name;
+    private String note;
+    private String configJson;
+    private String source;
     private LocalDateTime createdAt;
-    private LocalDateTime updatedAt;
 }

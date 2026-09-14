@@ -1,9 +1,8 @@
 package com.llama.hub.service;
 
+import lombok.extern.slf4j.Slf4j;
 import com.llama.hub.mapper.AdminUserMapper;
 import com.llama.hub.model.AdminUser;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
@@ -15,9 +14,9 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Service
+@Slf4j
 public class AdminUserService implements ApplicationRunner {
 
-    private static final Logger log = LoggerFactory.getLogger(AdminUserService.class);
     private static final int MAX_FAILS = 5;
     private static final long LOCK_MINUTES = 5;
     private static final int MIN_PASSWORD_LEN = 8;

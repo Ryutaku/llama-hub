@@ -1,10 +1,9 @@
 package com.llama.hub.service;
 
+import lombok.extern.slf4j.Slf4j;
 import com.llama.hub.mapper.ApiKeyMapper;
 import com.llama.hub.model.ApiKey;
 import com.llama.hub.util.ApiKeyUtil;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,9 +17,9 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
+@Slf4j
 public class KeyService {
 
-    private static final Logger log = LoggerFactory.getLogger(KeyService.class);
 
     private final ApiKeyMapper apiKeyMapper;
 

@@ -1,12 +1,11 @@
 package com.llama.hub.ops;
 
+import lombok.extern.slf4j.Slf4j;
 import com.llama.hub.config.OpsProperties;
 import net.schmizz.sshj.SSHClient;
 import net.schmizz.sshj.sftp.SFTPClient;
 import net.schmizz.sshj.connection.channel.direct.Session;
 import net.schmizz.sshj.transport.verification.PromiscuousVerifier;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PreDestroy;
@@ -21,9 +20,9 @@ import java.util.concurrent.TimeUnit;
  * 断线自动重连，慢操作由调用方放独立线程池。
  */
 @Service
+@Slf4j
 public class SshService {
 
-    private static final Logger log = LoggerFactory.getLogger(SshService.class);
 
     private final OpsProperties props;
     private final Object lock = new Object();
@@ -47,8 +46,13 @@ public class SshService {
             SSHClient c = new SSHClient();
             c.addHostKeyVerifier(new PromiscuousVerifier());
             c.setTimeout(props.getSshTimeoutSeconds() * 1000);
-            c.connect(props.getSshHost(), props.getSshPort());
-            c.authPublickey(props.getSshUser());
+            try {
+                c.connect(props.getSshHost(), props.getSshPort());
+                c.authPublickey(props.getSshUser());
+            } catch (Exception e) {
+                closeQuietly(c);
+                throw e;
+            }
             log.info("SSH connected {}@{}:{}", props.getSshUser(), props.getSshHost(), props.getSshPort());
             client = c;
             return c;
@@ -87,7 +91,7 @@ public class SshService {
             }
             return new ExecResult(out + err, exitCode);
         } catch (Exception e) {
-            invalidate();
+            closeQuietly(c);
             throw e;
         } finally {
             try {
@@ -108,7 +112,7 @@ public class SshService {
             channel.exec(command);
             return channel;
         } catch (Exception e) {
-            invalidate();
+            closeQuietly(c);
             throw e;
         }
     }
@@ -130,14 +134,27 @@ public class SshService {
     }
 
     public void invalidate() {
+        SSHClient c;
         synchronized (lock) {
-            if (client != null) {
-                try {
-                    client.close();
-                } catch (Exception ignored) {
-                }
+            c = client;
+            client = null;
+        }
+        closeQuietly(c);
+    }
+
+    /** 只关指定连接：若它仍是当前 client 则同时清空字段，否则（已被其他线程替换）直接关闭，避免误关新连接或泄漏旧连接。 */
+    private void closeQuietly(SSHClient c) {
+        if (c == null) {
+            return;
+        }
+        synchronized (lock) {
+            if (c == client) {
                 client = null;
             }
+        }
+        try {
+            c.close();
+        } catch (Exception ignored) {
         }
     }
 

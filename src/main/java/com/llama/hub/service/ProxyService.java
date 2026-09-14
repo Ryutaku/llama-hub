@@ -1,13 +1,12 @@
 package com.llama.hub.service;
 
+import lombok.extern.slf4j.Slf4j;
 import com.llama.hub.model.ApiKey;
 import com.llama.hub.model.CallLog;
 import com.llama.hub.mapper.ApiKeyMapper;
 import com.llama.hub.mapper.CallLogMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -37,9 +36,9 @@ import java.util.concurrent.atomic.AtomicReference;
 import tools.jackson.databind.node.ObjectNode;
 
 @Service
+@Slf4j
 public class ProxyService {
 
-    private static final Logger log = LoggerFactory.getLogger(ProxyService.class);
 
     private static final Set<String> HOP_HEADERS = new HashSet<>(Arrays.asList(
             "host", "content-length", "connection", "accept-encoding",

@@ -1,16 +1,15 @@
 package com.llama.hub.config;
 
+import lombok.extern.slf4j.Slf4j;
 import com.llama.hub.mapper.SchemaMapper;
 import jakarta.annotation.PostConstruct;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /** 启动时执行幂等建表（SQL 在 mybatis/SchemaMapper.xml）。 */
 @Component
+@Slf4j
 public class SchemaInitializer {
 
-    private static final Logger log = LoggerFactory.getLogger(SchemaInitializer.class);
 
     private final SchemaMapper schemaMapper;
 

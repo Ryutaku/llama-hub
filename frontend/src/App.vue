@@ -23,6 +23,12 @@ setUnauthorizedHandler(() => {
   authed.value = false
 })
 
+const toastIcon = {
+  success: 'fa-solid fa-circle-check',
+  error: 'fa-solid fa-circle-exclamation',
+  info: 'fa-solid fa-circle-info'
+}
+
 const tabs = [
   { key: 'dashboard', label: '仪表盘', icon: 'fa-solid fa-gauge-high' },
   { key: 'keys', label: 'API Keys', icon: 'fa-solid fa-key' },
@@ -113,15 +119,18 @@ onUnmounted(() => {
 <template>
   <div class="min-h-screen bg-gh-bg">
     <!-- Toast -->
-    <div v-if="ui.showToast" class="fixed top-4 left-1/2 -translate-x-1/2 z-[80]">
+    <div v-if="ui.showToast" class="fixed top-14 left-1/2 -translate-x-1/2 z-[80] w-max max-w-[calc(100vw-2rem)]">
       <div
-        class="toast-enter px-4 py-2 rounded-md text-sm border shadow-lg"
+        class="toast-enter flex items-center gap-2.5 px-4 py-2.5 rounded-lg text-sm font-medium border shadow-lg backdrop-blur-md"
         :class="ui.toastType === 'error'
-          ? 'bg-gh-red/15 border-gh-red/60 text-[#ffb3bd] shadow-[0_0_18px_-6px_rgba(240,69,92,0.6)]'
+          ? 'bg-[#1c1117]/95 border-gh-red/60 text-[#ffb3bd] shadow-[0_0_18px_-6px_rgba(240,69,92,0.6)]'
           : ui.toastType === 'success'
-            ? 'bg-gh-green/15 border-gh-green/60 text-gh-green shadow-[0_0_18px_-6px_rgba(25,181,132,0.6)]'
-            : 'bg-gh-panel/90 border-gh-border text-gh-text'"
-      >{{ ui.toastMsg }}</div>
+            ? 'bg-[#0b1713]/95 border-gh-green/60 text-gh-green shadow-[0_0_18px_-6px_rgba(25,181,132,0.6)]'
+            : 'bg-[#101826]/95 border-gh-border text-gh-text'"
+      >
+        <i :class="toastIcon[ui.toastType] || toastIcon.info" class="shrink-0"></i>
+        <span>{{ ui.toastMsg }}</span>
+      </div>
     </div>
 
     <!-- Login -->
@@ -130,7 +139,7 @@ onUnmounted(() => {
     <!-- Main -->
     <div v-else-if="authed" class="min-h-screen">
       <header class="app-header sticky top-0 z-40">
-        <div class="max-w-7xl mx-auto px-4 h-12 flex items-center gap-5">
+        <div class="w-full px-4 h-12 flex items-center gap-5">
           <div class="font-mono font-bold text-base whitespace-nowrap flex items-center gap-2.5 tracking-[0.08em] select-none">
             <span class="brand-badge">
               <i class="fa-solid fa-bolt-lightning"></i>
@@ -183,7 +192,7 @@ onUnmounted(() => {
         </div>
       </header>
 
-      <main class="max-w-7xl mx-auto px-4 py-5">
+      <main class="w-full px-4 py-5">
         <DashboardView v-if="tab === 'dashboard'" :upstream="upstream" :refresh="tab === 'dashboard'" />
         <ApiKeysView v-else-if="tab === 'keys'" />
         <LogsView v-else-if="tab === 'logs'" />

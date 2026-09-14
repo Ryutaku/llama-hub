@@ -92,6 +92,26 @@ select option {
   pointer-events: none;
 }
 
+/* ---- 荧光输入框（1px 边框 + 聚焦青色辉光，与登录表单一致） ---- */
+.glow-input {
+  border: 1px solid var(--color-gh-border);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+.glow-input::placeholder {
+  color: #4d5f78;
+}
+.glow-input:hover {
+  border-color: #2f4769;
+}
+.glow-input:focus {
+  border-color: var(--color-gh-cyan);
+  box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.16), 0 0 18px -6px rgba(34, 211, 238, 0.5);
+}
+/* 覆盖全局 input:focus-visible 的 2px 青色 outline（它会叠出粗边框） */
+.glow-input:focus-visible {
+  outline: none;
+}
+
 /* ---- 图标芯片 ---- */
 .chip {
   width: 28px;

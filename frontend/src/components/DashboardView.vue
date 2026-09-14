@@ -49,12 +49,15 @@ const LineChart = defineComponent({
   props: {
     data: { type: Array, default: () => [] },
     color: { type: String, default: '#22d3ee' },
-    id: { type: String, default: 'chart' }
+    id: { type: String, default: 'chart' },
+    fmt: { type: Function, default: null }
   },
   setup(props) {
     const W = 320
     const H = 90
     const PAD = 6
+    const hover = ref(-1)
+
     function geom() {
       const arr = props.data || []
       if (arr.length === 0) return null
@@ -66,13 +69,24 @@ const LineChart = defineComponent({
       })
       const line = pts.map(p => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ')
       const area = `${PAD},${H - PAD} ${line} ${W - PAD},${H - PAD}`
-      return { line, area, last: pts[pts.length - 1] }
+      return { pts, line, area, last: pts[pts.length - 1] }
     }
+
+    function onMove(e) {
+      const arr = props.data || []
+      if (arr.length === 0) return
+      const rect = e.currentTarget.getBoundingClientRect()
+      const x = (e.clientX - rect.left) / rect.width * W
+      const i = Math.round((x - PAD) * (arr.length - 1) / (W - PAD * 2))
+      hover.value = Math.max(0, Math.min(arr.length - 1, i))
+    }
+
     return () => {
       const g = geom()
       if (!g) return h('div', { class: 'h-20' })
       const gid = 'lg-' + props.id
-      return h('svg', { viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: 'none', class: 'w-full h-20' }, [
+      const fmt = props.fmt || (v => v)
+      const el = [
         h('defs', {}, [
           h('linearGradient', { id: gid, x1: '0', y1: '0', x2: '0', y2: '1' }, [
             h('stop', { offset: '0%', 'stop-color': props.color, 'stop-opacity': '0.3' }),
@@ -107,7 +121,37 @@ const LineChart = defineComponent({
           fill: props.color,
           style: `filter: drop-shadow(0 0 6px ${props.color})`
         })
-      ])
+      ]
+      if (hover.value >= 0 && hover.value < g.pts.length) {
+        const [hx, hy] = g.pts[hover.value]
+        el.push(
+          h('line', {
+            x1: hx, x2: hx, y1: PAD, y2: H - PAD,
+            stroke: 'rgba(148,163,184,0.35)', 'stroke-width': '1', 'stroke-dasharray': '3 3'
+          }),
+          h('circle', { cx: hx, cy: hy, r: '4', fill: props.color, stroke: '#090e17', 'stroke-width': '1.5' })
+        )
+      }
+      const svg = h('svg', {
+        viewBox: `0 0 ${W} ${H}`,
+        preserveAspectRatio: 'none',
+        class: 'w-full h-20 cursor-crosshair',
+        onMousemove: onMove,
+        onMouseleave: () => { hover.value = -1 }
+      }, el)
+      const tip = (hover.value >= 0 && hover.value < g.pts.length)
+        ? h('div', {
+            class: 'absolute -top-1 -translate-x-1/2 -translate-y-full px-2 py-1 rounded-md text-[11px] font-mono pointer-events-none whitespace-nowrap z-10',
+            style: {
+              left: (g.pts[hover.value][0] / W * 100) + '%',
+              color: props.color,
+              background: 'rgba(10,17,29,0.95)',
+              border: `1px solid ${props.color}55`,
+              boxShadow: '0 4px 12px -4px rgba(0,0,0,0.8)'
+            }
+          }, `${props.data[hover.value].label || ''} ${fmt(Number(props.data[hover.value].value) || 0)}`)
+        : null
+      return h('div', { class: 'relative' }, [svg, tip])
     }
   }
 })
@@ -162,7 +206,7 @@ const LineChart = defineComponent({
           <span class="w-1 h-3.5 rounded-full bg-gh-cyan shadow-[0_0_8px_rgba(34,211,238,0.8)]"></span>
           近 7 天请求量
         </div>
-        <LineChart id="req" :data="(data?.trend || []).map(d => ({ value: d.count }))" color="#22d3ee" />
+        <LineChart id="req" :data="(data?.trend || []).map(d => ({ label: d.date, value: d.count }))" :fmt="fmtInt" color="#22d3ee" />
         <div class="flex justify-between text-[10px] text-gh-muted mt-1.5 font-mono">
           <span v-for="d in data?.trend || []" :key="d.date">{{ d.date }}</span>
         </div>
@@ -172,7 +216,7 @@ const LineChart = defineComponent({
           <span class="w-1 h-3.5 rounded-full bg-gh-green shadow-[0_0_8px_rgba(25,181,132,0.8)]"></span>
           近 7 天 Tokens 消耗
         </div>
-        <LineChart id="tok" :data="(data?.trend || []).map(d => ({ value: d.tokens }))" color="#19b584" />
+        <LineChart id="tok" :data="(data?.trend || []).map(d => ({ label: d.date, value: d.tokens }))" :fmt="fmtTok" color="#19b584" />
         <div class="flex justify-between text-[10px] text-gh-muted mt-1.5 font-mono">
           <span v-for="d in data?.trend || []" :key="d.date">{{ d.date }}</span>
         </div>

@@ -1,10 +1,10 @@
 package com.llama.hub.ops;
 
+import lombok.extern.slf4j.Slf4j;
 import com.llama.hub.config.OpsProperties;
+import com.llama.hub.model.ModelStatusInfo;
 import com.llama.hub.mapper.ModelConfigMapper;
 import com.llama.hub.model.ModelConfig;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -27,9 +27,9 @@ import java.util.concurrent.atomic.AtomicLong;
  * 维护 STOPPED/STARTING/RUNNING/STOPPING/ERROR/UNKNOWN 状态并广播变化。
  */
 @Service
+@Slf4j
 public class ModelStatusService {
 
-    private static final Logger log = LoggerFactory.getLogger(ModelStatusService.class);
 
     public enum State {
         STOPPED, STARTING, RUNNING, STOPPING, ERROR, UNKNOWN
@@ -54,7 +54,9 @@ public class ModelStatusService {
     private volatile boolean healthOk;
     private volatile boolean sshAvailable;
     private volatile String message;
+    private final java.util.concurrent.atomic.AtomicInteger sshConsecutiveFails = new java.util.concurrent.atomic.AtomicInteger(0);
     private volatile String lastCmdline;
+    private volatile Map<String, String> lastEnviron;
     private final AtomicLong lastChangeAt = new AtomicLong(0);
     private final AtomicLong uptimeStartAt = new AtomicLong(0);
     private volatile long transitionDeadline;
@@ -83,6 +85,21 @@ public class ModelStatusService {
         } catch (Exception e) {
             log.warn("model status probe failed: {}", e.toString());
         }
+        if (!sshAvailable) {
+            int n = sshConsecutiveFails.incrementAndGet();
+            if (n == 3) {
+                log.warn("SSH to {} unreachable 3x in a row, backing off 60s", props.getSshHost());
+            }
+            if (n >= 3) {
+                try {
+                    TimeUnit.SECONDS.sleep(60);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        } else {
+            sshConsecutiveFails.set(0);
+        }
     }
 
     private void probeOnce() {
@@ -90,6 +107,7 @@ public class ModelStatusService {
         Integer newPid = null;
         boolean newPort = false;
         String newCmdline = null;
+        Map<String, String> newEnv = null;
 
         try {
             String out = ssh.exec(probeCommand(), 12).output();
@@ -105,6 +123,15 @@ public class ModelStatusService {
                     newPort = true;
                 } else if (line.startsWith("CMDLINE:")) {
                     newCmdline = line.substring("CMDLINE:".length()).trim();
+                } else if (line.startsWith("ENV:")) {
+                    String kv = line.substring("ENV:".length());
+                    int eq = kv.indexOf('=');
+                    if (eq > 0) {
+                        if (newEnv == null) {
+                            newEnv = new LinkedHashMap<>();
+                        }
+                        newEnv.put(kv.substring(0, eq), kv.substring(eq + 1));
+                    }
                 }
             }
         } catch (Exception e) {
@@ -146,6 +173,7 @@ public class ModelStatusService {
         this.healthOk = newHealth;
         this.sshAvailable = sshOk;
         this.lastCmdline = newCmdline;
+        this.lastEnviron = newEnv;
 
         if (target != prev) {
             this.state = target;
@@ -168,7 +196,13 @@ public class ModelStatusService {
         sb.append("pid=\"$(tr -d '[:space:]' < ").append(props.pidFile()).append(" 2>/dev/null || true)\"\n");
         sb.append("if [ -n \"$pid\" ] && kill -0 \"$pid\" 2>/dev/null; then echo \"PID_OK $pid\"; else echo PID_NONE; fi\n");
         sb.append("if ss -H -ltn sport = :").append(currentPort()).append(" 2>/dev/null | grep -q .; then echo PORT_OK; else echo PORT_NONE; fi\n");
-        sb.append("if [ -n \"$pid\" ] && [ -d \"/proc/$pid\" ]; then echo \"CMDLINE:$(tr '\\0' ' ' < /proc/$pid/cmdline 2>/dev/null)\"; fi\n");
+        sb.append("if [ -n \"$pid\" ] && [ -d \"/proc/$pid\" ]; then\n");
+        sb.append("  echo \"CMDLINE:$(tr '\\0' ' ' < /proc/$pid/cmdline 2>/dev/null)\"\n");
+        // 只回传白名单前缀的环境变量，避免整包 environ（可能含敏感值）过网
+        sb.append("  tr '\\0' '\\n' < /proc/$pid/environ 2>/dev/null | grep -E '^(")
+                .append(String.join("|", ModelConfigService.ENV_KEY_PREFIXES))
+                .append(")' | while IFS= read -r l; do printf 'ENV:%s\\n' \"$l\"; done\n");
+        sb.append("fi\n");
         return sb.toString();
     }
 
@@ -229,22 +263,27 @@ public class ModelStatusService {
         return state;
     }
 
-    public Map<String, Object> status() {
-        Map<String, Object> m = new LinkedHashMap<>();
-        m.put("state", state.name());
-        m.put("pid", pid);
-        m.put("portListening", portListening);
-        m.put("healthOk", healthOk);
-        m.put("sshAvailable", sshAvailable);
+    public ModelStatusInfo status() {
+        ModelStatusInfo m = new ModelStatusInfo();
+        m.setState(state.name());
+        m.setPid(pid);
+        m.setPortListening(portListening);
+        m.setHealthOk(healthOk);
+        m.setSshAvailable(sshAvailable);
         long uptime = uptimeStartAt.get();
-        m.put("uptimeSec", uptime > 0 && state == State.RUNNING ? (System.currentTimeMillis() - uptime) / 1000 : null);
-        m.put("lastChangeAt", lastChangeAt.get() == 0 ? null : lastChangeAt.get());
-        m.put("message", message);
+        m.setUptimeSec(uptime > 0 && state == State.RUNNING ? (System.currentTimeMillis() - uptime) / 1000 : null);
+        m.setLastChangeAt(lastChangeAt.get() == 0 ? null : lastChangeAt.get());
+        m.setMessage(message);
         return m;
     }
 
     public String lastCmdline() {
         return lastCmdline;
+    }
+
+    /** 运行进程启动时的环境变量（白名单前缀，探测不可用时为 null）。 */
+    public Map<String, String> lastEnviron() {
+        return lastEnviron;
     }
 
     public SseEmitter subscribeEvents() {
@@ -263,7 +302,7 @@ public class ModelStatusService {
     }
 
     private void emitEvent() {
-        Map<String, Object> payload = status();
+        ModelStatusInfo payload = status();
         for (SseEmitter emitter : emitters) {
             try {
                 emitter.send(SseEmitter.event().name("state").data(payload, MediaType.APPLICATION_JSON));

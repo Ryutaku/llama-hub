@@ -54,7 +54,7 @@ public class StatsService {
         Map<String, Object[]> byDate = new LinkedHashMap<>();
         for (Map<String, Object> row : jdbcTemplate.queryForList(
                 "SELECT CAST(started_at AS DATE) AS \"d\", COUNT(*) AS \"cnt\", COALESCE(SUM(total_tokens),0) AS \"tok\" "
-                        + "FROM call_log WHERE started_at >= ? GROUP BY CAST(started_at AS DATE)", today)) {
+                        + "FROM call_log WHERE started_at >= ? GROUP BY CAST(started_at AS DATE)", start.atStartOfDay())) {
             byDate.put(String.valueOf(row.get("d")),
                     new Object[]{ ((Number) row.get("cnt")).longValue(), ((Number) row.get("tok")).longValue() });
         }

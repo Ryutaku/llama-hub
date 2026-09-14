@@ -1,10 +1,9 @@
 package com.llama.hub.ops;
 
+import lombok.extern.slf4j.Slf4j;
 import com.llama.hub.config.OpsProperties;
 import com.llama.hub.service.ApiException;
 import com.llama.hub.service.AuditService;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
@@ -21,9 +20,9 @@ import java.util.concurrent.Executors;
  * - 启动按 model_config 的完整参数行生成 start-gateway.sh 推送到 185 后执行
  */
 @Service
+@Slf4j
 public class ModelOpsService {
 
-    private static final Logger log = LoggerFactory.getLogger(ModelOpsService.class);
     private final SshService ssh;
     private final OpsProperties props;
     private final ModelStatusService statusService;
@@ -139,6 +138,7 @@ public class ModelOpsService {
                 .replace("{{MODEL}}", model == null ? "" : model)
                 .replace("{{MMPROJ}}", mmproj == null ? "" : mmproj)
                 .replace("{{PORT}}", String.valueOf(port))
+                .replace("{{ENV}}", configService.formatForScriptEnv(configService.currentEnv()))
                 .replace("{{CUDA_DEVICE}}", String.valueOf(props.getCudaDevice()))
                 .replace("{{ARGS}}", configService.formatForScript(args));
         if (script.contains("{{")) {

@@ -103,8 +103,16 @@ export const api = {
   modelStart: () => request('/api/admin/model/start', { method: 'POST' }),
   modelStop: () => request('/api/admin/model/stop', { method: 'POST' }),
   modelConfig: () => request('/api/admin/model/config'),
-  modelConfigSave: (args) => request('/api/admin/model/config', { method: 'PUT', body: JSON.stringify({ args }) }),
   modelSnapshot: () => request('/api/admin/model/config/snapshot', { method: 'POST' }),
+  modelPresets: () => request('/api/admin/model/presets'),
+  modelPresetSave: (name, note, args, env) =>
+    request('/api/admin/model/presets', { method: 'POST', body: JSON.stringify({ name, note: note || '', args: args || '', env: env || '' }) }),
+  modelPresetUpdate: (id, name, note) =>
+    request(`/api/admin/model/presets/${id}`, { method: 'PUT', body: JSON.stringify({ name, note: note || '' }) }),
+  modelPresetDelete: (id) => request(`/api/admin/model/presets/${id}`, { method: 'DELETE' }),
+  modelPresetDiff: (id) => request(`/api/admin/model/presets/${id}/diff`),
+  modelPresetApply: (id) => request(`/api/admin/model/presets/${id}/apply`, { method: 'POST' }),
+  modelPresetStart: (id) => request(`/api/admin/model/presets/${id}/start`, { method: 'POST' }),
   modelLogsUrl: () => apiBase + '/api/admin/model/logs',
   modelEventsUrl: () => apiBase + '/api/admin/model/events'
 }

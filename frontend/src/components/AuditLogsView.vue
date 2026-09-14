@@ -17,7 +17,7 @@ const endAt = ref(today())
 const logs = ref([])
 const total = ref(0)
 const page = ref(1)
-const size = ref(20)
+const size = ref(15)
 const loading = ref(false)
 const error = ref('')
 

@@ -57,8 +57,8 @@ llama-hub 已实现 API Key 网关（认证/限额/调用日志/仪表盘），�
 | POST | `/api/admin/model/start` | 启动（异步），202 + STARTING |
 | POST | `/api/admin/model/stop` | 停止（异步），202 + STOPPING |
 | GET | `/api/admin/model/config` | 当前完整参数行 + 来源 + 运行参数行（drift 标记） |
-| PUT | `/api/admin/model/config` | 保存完整参数行（词法校验，返回 diff，重启生效） |
-| POST | `/api/admin/model/config/snapshot` | 从运行进程 cmdline 快照完整参数行（返回 diff，确认后落库） |
+| PUT | `/api/admin/model/config` | 保存完整参数行 + 环境变量行（词法校验，返回 diff，重启生效） |
+| POST | `/api/admin/model/config/snapshot` | 从运行进程 cmdline/environ 快照参数行与白名单环境变量（返回 diff + 运行事实，确认后落库） |
 | GET | `/api/admin/model/logs` | SSE：llama.log 实时流（event: log） |
 | GET | `/api/admin/model/events` | SSE：状态机变化事件 |
 
@@ -84,7 +84,7 @@ SSH 执行 `bash /home/llama-cpp/stop.sh`（现有脚本：SIGTERM → 30s → S
 
 ### 启动
 
-1. 读 `model_config` 的完整参数行，生成完整启动脚本（模板 = 现有 start.sh 结构：flock 锁、pid 文件读写、端口占用检测、跨天日志归档、`numactl --cpunodebind=0 --membind=0`、`CUDA_VISIBLE_DEVICES` 注入、gawk 时间戳日志处理；exec 的参数部分整段由参数行原样渲染，模板不再注入任何 flag）
+1. 读 `model_config` 的完整参数行 + 环境变量行，生成完整启动脚本（模板 = 现有 start.sh 结构：flock 锁、pid 文件读写、端口占用检测、跨天日志归档、`numactl --cpunodebind=0 --membind=0`、`CUDA_VISIBLE_DEVICES` 注入、gawk 时间戳日志处理；exec 的参数部分整段由参数行原样渲染，环境变量行渲染为 `export K=V` 置于 `CUDA_DEVICE` 解析之前，模板不再注入任何 flag）
 2. SSH 原子写入 `/home/llama-cpp/start-gateway.sh`（tmp + mv）+ `chmod +x`
 3. SSH 执行 `bash /home/llama-cpp/start-gateway.sh`，置 STARTING
 4. 脚本内 PID 文件与现有机制兼容，stop.sh / 手工 start.sh 均可继续管理同一进程
@@ -93,12 +93,12 @@ SSH 执行 `bash /home/llama-cpp/stop.sh`（现有脚本：SIGTERM → 30s → S
 
 ### 存储
 
-参数直接以「llama-server 完整参数行」形式存储（命令行中二进制路径之后的全部参数，含 `-m/-mm/--host/--port` 等，任意参数可自由增删改）。UI 以代码块形式直接编辑（默认每行一个参数），启动脚本原样渲染进 start-gateway.sh——比结构化表单灵活：
+参数直接以「llama-server 完整参数行」形式存储（命令行中二进制路径之后的全部参数，含 `-m/-mm/--host/--port` 等，任意参数可自由增删改）；环境变量以 `K=V` 行存储（限白名单前缀，见快照流程），UI 同样以代码块直接编辑（每行一个 K=V）。两者启动时分别渲染进 start-gateway.sh 的参数行与 export 段——比结构化表单灵活：
 
 ```sql
 CREATE TABLE model_config (
     id          BIGINT AUTO_INCREMENT PRIMARY KEY,
-    config_json TEXT NOT NULL,          -- {"args": "<完整参数行>"}
+    config_json TEXT NOT NULL,          -- {"args": "<完整参数行>", "env": "<K=V K=V ...>"}
     source      VARCHAR(20) NOT NULL,   -- default / snapshot / edited
     updated_at  TIMESTAMP
 );
@@ -117,7 +117,7 @@ CREATE TABLE model_config (
 ### 修改与快照流程
 
 - 修改：代码块编辑完整参数行（默认每行一个参数）→ PUT（词法校验）→ 落库 → UI 明示「已保存，重启后生效」→ 点启动时把参数行原样渲染进脚本
-- 快照：取运行进程 `/proc/<pid>/cmdline` → 去掉二进制路径得到完整参数行 → 与库内参数行做 flag 级 diff → 前端展示 diff，覆盖落库（source=snapshot）
+- 快照：取运行进程 `/proc/<pid>/cmdline` → 去掉二进制路径得到完整参数行；同时取 `/proc/<pid>/environ` 白名单前缀变量（`CUDA_VISIBLE_DEVICES` / `NVIDIA_*` / `GGML_*` / `LLAMA_*` / `OMP_*` / `MKL_*`，非白名单静默丢弃）→ 与库内做 flag 级 + env 键级 diff（diff 项以 `kind: arg/env` 区分）→ 前端展示 diff，覆盖落库（source=snapshot）。快照响应附带 `runtimeFacts`：llama.log 中最近一次 `llama-server starting:` 之后匹配 `flash attention|graph|main_gpu|tensor split|offloaded|spec` 的日志行，只读展示（graph/flash-attn 实际生效状态以日志为准）
 - 一致性提示：config API 返回 `runningArgs` 与 `drift`（运行参数行与库内参数行 token 级比较），不一致时显示「运行参数与配置不一致」徽标，引导用快照
 - 探测跟随：状态探测（端口检查 + `/health`）与启动脚本的端口/文件检查从参数行解析 `--port` / `-m` / `-mm`，缺失时回退 `gateway.model.*` 配置
 
@@ -133,7 +133,7 @@ CREATE TABLE model_config (
 
 - 状态卡：state 徽标（配色区分 RUNNING/STARTING/STOPPED/ERROR/UNKNOWN）、PID、uptime、health、端口、「配置不一致」徽标
 - 操作区：启动/停止按钮（按状态启用/禁用、防抖），STARTING 时展示「模型加载中」+ 日志尾部
-- 参数区：代码块直接编辑完整参数行（默认每行一个参数；来源徽标 + 更新时间 + 「运行参数与配置不一致」徽标 + 当前运行参数对照），保存 + 「从服务器快照」（flag 级 diff 弹窗）；参数区与日志区 Tab 切换
+- 参数区：代码块直接编辑完整参数行 + 环境变量行（来源徽标 + 更新时间 + 「运行参数/环境变量与配置不一致」徽标 + 当前运行参数/环境对照 + 运行事实只读块），保存 + 「从服务器快照」（参数/env 混合 diff 弹窗）；参数区与日志区 Tab 切换
 - 日志区：终端样式 SSE 流，自动滚动 + 过滤
 - 顶栏上游指示灯改绑 `ModelStatusService`（语义不变：绿/红）
 

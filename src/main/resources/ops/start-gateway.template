@@ -15,6 +15,7 @@ readonly SERVER="{{SERVER}}"
 readonly MODEL="{{MODEL}}"
 readonly MMPROJ="{{MMPROJ}}"
 readonly PORT="{{PORT}}"
+{{ENV}}
 readonly CUDA_DEVICE="${CUDA_VISIBLE_DEVICES:-{{CUDA_DEVICE}}}"
 
 mkdir -p "$LOG_DIR"

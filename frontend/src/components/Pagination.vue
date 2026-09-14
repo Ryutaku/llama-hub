@@ -1,16 +1,15 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 
 const props = defineProps({
   total: { type: Number, default: 0 },
   page: { type: Number, default: 1 },
-  size: { type: Number, default: 20 }
+  size: { type: Number, default: 15 }
 })
 
 const emit = defineEmits(['update:page', 'update:size', 'change'])
 
-const jump = ref('')
-const SIZES = [10, 20, 50, 100]
+const SIZES = [10, 15, 20, 50, 100]
 
 const totalPages = computed(() => Math.max(1, Math.ceil(props.total / props.size)))
 const cur = computed(() => Math.min(Math.max(props.page, 1), totalPages.value))
@@ -27,12 +26,19 @@ watch([() => props.total, () => props.size], () => {
 const pageItems = computed(() => {
   const c = cur.value
   const t = totalPages.value
-  if (t <= 5) return Array.from({ length: t }, (_, i) => i + 1)
-  const items = [1]
-  if (c > 3) items.push('gap-start')
-  for (let p = Math.max(2, c - 1); p <= Math.min(t - 1, c + 1); p++) items.push(p)
-  if (c < t - 2) items.push('gap-end')
-  items.push(t)
+  if (t <= 7) return Array.from({ length: t }, (_, i) => i + 1)
+  const left = Math.max(1, Math.min(c - 2, t - 5))
+  const right = Math.min(t, left + 4)
+  const items = []
+  if (left > 1) {
+    items.push(1)
+    if (left > 2) items.push('gap')
+  }
+  for (let p = left; p <= right; p++) items.push(p)
+  if (right < t) {
+    if (right < t - 1) items.push('gap')
+    items.push(t)
+  }
   return items
 })
 
@@ -54,64 +60,105 @@ function setSize(s) {
   emit('change')
 }
 
-function doJump() {
-  const n = parseInt(jump.value, 10)
-  if (Number.isNaN(n) || n < 1) return
-  go(n)
-  jump.value = ''
+const sizeOpen = ref(false)
+const sizeUp = ref(false)
+const sizeBox = ref(null)
+const MENU_H = 132
+
+function toggleSize() {
+  if (sizeOpen.value) {
+    sizeOpen.value = false
+    return
+  }
+  const btn = sizeBox.value && sizeBox.value.querySelector('.page-size-btn')
+  if (btn) {
+    const rect = btn.getBoundingClientRect()
+    sizeUp.value =
+      window.innerHeight - rect.bottom < MENU_H && rect.top > MENU_H
+  }
+  sizeOpen.value = true
 }
+
+function pickSize(s) {
+  sizeOpen.value = false
+  setSize(s)
+}
+
+function onDocMouseDown(e) {
+  if (sizeBox.value && !sizeBox.value.contains(e.target)) {
+    sizeOpen.value = false
+  }
+}
+
+function onKeydown(e) {
+  if (e.key === 'Escape') sizeOpen.value = false
+}
+
+function onResize() {
+  sizeOpen.value = false
+}
+
+onMounted(() => {
+  document.addEventListener('mousedown', onDocMouseDown)
+  document.addEventListener('keydown', onKeydown)
+  window.addEventListener('resize', onResize)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('mousedown', onDocMouseDown)
+  document.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('resize', onResize)
+})
 </script>
 
 <template>
-  <div v-if="total === 0" class="mt-3 text-xs text-gh-muted">共 0 条</div>
+  <div v-if="total === 0" class="pagination-stats">共 0 条</div>
   <div v-else class="pagination-bar">
-    <span class="pagination-stats">共 {{ fmt(total) }} 条</span>
-
-    <div class="pagination-controls">
-      <label class="flex items-center gap-1.5">
-        <select class="page-size-select" :value="size" @change="setSize(Number($event.target.value))">
-          <option v-for="s in SIZES" :key="s" :value="s">{{ s }}</option>
-        </select>
-        <span class="text-xs text-gh-muted whitespace-nowrap">条 / 页</span>
-      </label>
-
-      <div v-if="totalPages > 1" class="flex items-center gap-1">
-        <button type="button" class="page-btn" title="首页" :disabled="cur <= 1" @click="go(1)">
-          <i class="fa-solid fa-angles-left text-[10px]"></i>
-        </button>
-        <button type="button" class="page-btn" title="上一页" :disabled="cur <= 1" @click="go(cur - 1)">
-          <i class="fa-solid fa-chevron-left text-xs"></i>
-        </button>
-        <template v-for="it in pageItems" :key="String(it)">
-          <span v-if="typeof it === 'string'" class="page-ellipsis">…</span>
-          <button
-            v-else
-            type="button"
-            class="page-btn"
-            :class="{ 'page-active': it === cur }"
-            @click="go(it)"
-          >{{ it }}</button>
-        </template>
-        <button type="button" class="page-btn" title="下一页" :disabled="cur >= totalPages" @click="go(cur + 1)">
-          <i class="fa-solid fa-chevron-right text-xs"></i>
-        </button>
-        <button type="button" class="page-btn" title="末页" :disabled="cur >= totalPages" @click="go(totalPages)">
-          <i class="fa-solid fa-angles-right text-[10px]"></i>
-        </button>
-
-        <div class="flex items-center gap-1.5 ml-2">
-          <input
-            v-model="jump"
-            type="number"
-            class="jump-input"
-            :min="1"
-            :max="totalPages"
-            @keyup.enter="doJump"
-          />
-          <span class="text-xs text-gh-muted whitespace-nowrap">/ {{ totalPages }} 页</span>
+    <div class="pagination-left">
+      <span class="pagination-stats">显示第 {{ fmt(start) }} 到 {{ fmt(end) }} 条，共 {{ fmt(total) }} 条</span>
+      <div class="size-dropdown" ref="sizeBox">
+        <div class="size-anchor">
+          <button type="button" class="page-size-btn" :class="{ open: sizeOpen }" @click="toggleSize">
+            {{ size }}
+            <i class="fa-solid fa-chevron-down size-caret"></i>
+          </button>
+        <ul v-if="sizeOpen" class="size-menu" :class="{ up: sizeUp }" role="listbox" aria-label="每页条数">
+          <li
+            v-for="s in SIZES"
+            :key="s"
+            class="size-option"
+            :class="{ active: s === size }"
+            role="option"
+            :aria-selected="s === size"
+            @click="pickSize(s)"
+          >
+            <span>{{ s }}</span>
+            <i v-if="s === size" class="fa-solid fa-check text-[10px]"></i>
+          </li>
+        </ul>
         </div>
+        <span class="text-xs text-gh-muted whitespace-nowrap">条 / 页</span>
       </div>
     </div>
+
+    <nav class="page-nav" aria-label="分页导航">
+      <button type="button" class="page-item" title="上一页" aria-label="上一页" :disabled="cur <= 1" @click="go(cur - 1)">
+        <i class="fa-solid fa-chevron-left"></i>
+      </button>
+      <template v-for="(it, i) in pageItems" :key="`${i}-${it}`">
+        <span v-if="it === 'gap'" class="page-item page-ellipsis">…</span>
+        <button
+          v-else
+          type="button"
+          class="page-item"
+          :class="{ 'page-active': it === cur }"
+          :aria-current="it === cur ? 'page' : undefined"
+          @click="go(it)"
+        >{{ it }}</button>
+      </template>
+      <button type="button" class="page-item" title="下一页" aria-label="下一页" :disabled="cur >= totalPages" @click="go(cur + 1)">
+        <i class="fa-solid fa-chevron-right"></i>
+      </button>
+    </nav>
   </div>
 </template>
 
@@ -121,122 +168,173 @@ function doJump() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.pagination-left {
+  display: flex;
+  align-items: center;
+  gap: 24px;
   flex-wrap: wrap;
 }
 
 .pagination-stats {
-  font-size: 12px;
-  color: var(--color-gh-muted);
+  font-size: 13px;
+  color: var(--color-gh-text);
   font-variant-numeric: tabular-nums;
 }
 
-.pagination-controls {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.page-size-select {
-  height: 30px;
-  padding: 0 26px 0 10px;
-  border: 1px solid var(--color-gh-border);
-  border-radius: 8px;
-  background-color: #0a111d;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M2.5 4.5L6 8L9.5 4.5' stroke='%237e90a9' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 8px center;
-  background-size: 12px;
-  color: var(--color-gh-text);
-  font-size: 12px;
-  cursor: pointer;
-  appearance: none;
-  -webkit-appearance: none;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
-}
-.page-size-select:hover {
-  border-color: rgba(34, 211, 238, 0.45);
-}
-.page-size-select:focus {
-  border-color: var(--color-gh-cyan);
-  outline: none;
-  box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.16);
-}
-
-.page-btn {
-  width: 30px;
-  height: 30px;
+.size-dropdown {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  gap: 6px;
+}
+
+.size-anchor {
+  position: relative;
+  display: inline-flex;
+}
+
+.page-size-btn {
+  height: 30px;
+  min-width: 64px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   border: 1px solid var(--color-gh-border);
   border-radius: 8px;
   background-color: #0a111d;
   color: var(--color-gh-text);
   font-size: 12px;
   font-weight: 500;
+  font-variant-numeric: tabular-nums;
   cursor: pointer;
-  user-select: none;
-  flex: 0 0 auto;
-  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease,
-    transform 0.08s ease, box-shadow 0.12s ease;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
 }
-.page-btn:hover:not(:disabled):not(.page-active) {
+.page-size-btn:hover,
+.page-size-btn.open {
   border-color: rgba(34, 211, 238, 0.45);
-  background-color: #101c2e;
 }
-.page-btn:active:not(:disabled):not(.page-active) {
-  transform: scale(0.94);
-  background-color: #16233a;
+.page-size-btn:focus {
+  border-color: var(--color-gh-cyan);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.16);
 }
-.page-btn:disabled:not(.page-active) {
-  color: #4d5f78;
-  background-color: #0a111d;
-  cursor: not-allowed;
+.size-caret {
+  font-size: 10px;
+  color: var(--color-gh-muted);
+  transition: transform 0.15s ease, color 0.15s ease;
 }
-.page-btn.page-active {
-  border-color: transparent;
-  background: var(--color-gh-green);
-  color: #04121a;
-  font-weight: 700;
-  box-shadow: 0 0 14px -3px rgba(34, 211, 238, 0.7);
+.page-size-btn.open .size-caret {
+  transform: rotate(180deg);
+  color: var(--color-gh-cyan);
 }
 
-.page-ellipsis {
-  width: 22px;
+.size-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  min-width: 100%;
+  width: max-content;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-gh-panel);
+  border: 1px solid var(--color-gh-border);
+  border-radius: 8px;
+  box-shadow: 0 12px 28px -12px rgba(0, 0, 0, 0.85), inset 0 1px 0 rgba(140, 180, 240, 0.07);
+}
+.size-menu.up {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
+
+.size-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-gh-text);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+.size-option:hover {
+  background: rgba(34, 211, 238, 0.12);
+  color: #7ee7f8;
+}
+.size-option.active {
+  color: #7ee7f8;
+  font-weight: 700;
+}
+.size-option.active .fa-check {
+  color: var(--color-gh-cyan);
+}
+
+.page-nav {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--color-gh-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background-color: #0a111d;
+}
+
+.page-item {
   height: 30px;
+  min-width: 30px;
+  padding: 0 8px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--color-gh-muted);
+  border: none;
+  border-right: 1px solid var(--color-gh-border);
+  background: transparent;
+  color: var(--color-gh-text);
   font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
   user-select: none;
   flex: 0 0 auto;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+.page-item:last-child {
+  border-right: none;
+}
+.page-item i {
+  font-size: 11px;
+}
+.page-item:hover:not(:disabled):not(.page-active) {
+  background-color: #101c2e;
+}
+.page-item:active:not(:disabled):not(.page-active) {
+  background-color: #16233a;
+}
+.page-item:disabled {
+  color: #4d5f78;
+  cursor: not-allowed;
+}
+.page-item.page-active {
+  background: rgba(34, 211, 238, 0.14);
+  color: #7ee7f8;
+  font-weight: 700;
 }
 
-.jump-input {
-  width: 52px;
-  height: 30px;
-  padding: 0 6px;
-  text-align: center;
-  border: 1px solid var(--color-gh-border);
-  border-radius: 8px;
-  background-color: #0a111d;
-  font-size: 12px;
-  font-family: var(--font-mono);
-  color: var(--color-gh-text);
-  outline: none;
-  font-variant-numeric: tabular-nums;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
-}
-.jump-input:focus {
-  border-color: var(--color-gh-cyan);
-  box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.16);
-}
-.jump-input::-webkit-outer-spin-button,
-.jump-input::-webkit-inner-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
+.page-ellipsis {
+  min-width: 26px;
+  color: var(--color-gh-muted);
+  cursor: default;
 }
 </style>

@@ -1,13 +1,16 @@
 package com.llama.hub.ops;
 
+import lombok.extern.slf4j.Slf4j;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 import com.llama.hub.config.OpsProperties;
 import com.llama.hub.mapper.ModelConfigMapper;
+import com.llama.hub.model.ConfigSaveResult;
+import com.llama.hub.model.DiffItem;
 import com.llama.hub.model.ModelConfig;
+import com.llama.hub.model.ModelConfigInfo;
+import com.llama.hub.model.ModelSnapshotResult;
 import com.llama.hub.service.ApiException;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -18,32 +21,47 @@ import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
- * 模型启动参数：唯一来源是 H2 model_config 表（单行，存完整参数行）。
+ * 模型启动参数：唯一来源是 H2 model_config 表（单行，存完整参数行 + 环境变量行）。
  * 完整参数行 = llama-server 进程的全部参数（不含二进制路径），-m/-mm/--host/--port 等均可自由增删，
  * UI 直接编辑，启动脚本原样渲染进 start-gateway.sh，重启生效；
- * 快照从运行进程 cmdline 提取同一行，防止漂移。
+ * 环境变量行 = 白名单前缀的 K=V 集合，快照从运行进程 environ 提取，脚本渲染为 export 行；
+ * 快照同时抓取最近一次启动的日志事实行（flash attention / graph / 分卡等），只读展示。
  */
 @Service
+@Slf4j
 public class ModelConfigService {
 
-    private static final Logger log = LoggerFactory.getLogger(ModelConfigService.class);
 
     private final ModelConfigMapper mapper;
     private final ModelStatusService statusService;
     private final OpsProperties props;
+    private final SshService ssh;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private static final Pattern FLAG_RE = Pattern.compile("^--[a-z][a-z0-9-]*$|^-[a-zA-Z][a-zA-Z0-9]*$");
     private static final Pattern VALUE_RE = Pattern.compile("^[A-Za-z0-9/][A-Za-z0-9._,+-/]*$");
     private static final int MAX_ARGS_LEN = 4000;
 
+    /** 允许纳管的环境变量前缀白名单（探测抓取、校验、diff 共用）。 */
+    public static final List<String> ENV_KEY_PREFIXES = List.of(
+            "CUDA_VISIBLE_DEVICES", "NVIDIA_", "GGML_", "LLAMA_", "OMP_", "MKL_");
+    private static final Pattern ENV_KEY_RE = Pattern.compile("^[A-Za-z_][A-Za-z0-9_]*$");
+    private static final Pattern ENV_VALUE_RE = Pattern.compile("^[A-Za-z0-9._,+-/]*$");
+    private static final int MAX_ENV_LEN = 1000;
+
+    /** 运行事实：最近一次启动日志中匹配这些关键词的行（只读展示）。 */
+    private static final String FACT_PATTERN = "flash attention|graph|main_gpu|tensor split|offloaded|spec";
+    private static final int MAX_FACTS = 50;
+
     /** 基线 = 2026-09-14 185 实际运行进程完整参数行（非 start.sh 旧值）。 */
     private final String defaultArgs;
 
-    public ModelConfigService(ModelConfigMapper mapper, ModelStatusService statusService, OpsProperties props) {
+    public ModelConfigService(ModelConfigMapper mapper, ModelStatusService statusService,
+                              OpsProperties props, SshService ssh) {
         this.mapper = mapper;
         this.statusService = statusService;
         this.props = props;
+        this.ssh = ssh;
         this.defaultArgs = String.join(" ",
                 "-m", props.getModelPath(),
                 "-mm", props.getMmprojPath(),
@@ -61,37 +79,43 @@ public class ModelConfigService {
                 "--no-log-timestamps");
     }
 
-    /** 当前配置：完整参数行 + 来源 + 运行进程参数行（drift 表示两者不一致）。 */
-    public Map<String, Object> get() {
+    /** 当前配置：完整参数行 + 环境变量行 + 来源 + 运行进程对照（drift 表示不一致）。 */
+    public ModelConfigInfo get() {
         ModelConfig row = ensureRow();
         String args = argsFromJson(row.getConfigJson());
+        String env = envFromJson(row.getConfigJson());
         String cmdline = statusService.lastCmdline();
         String runningArgs = (cmdline == null || cmdline.isBlank()) ? "" : extractFullArgs(cmdline);
-        Map<String, Object> m = new LinkedHashMap<>();
-        m.put("args", args);
-        m.put("source", row.getSource());
-        m.put("updatedAt", row.getUpdatedAt() == null ? null : row.getUpdatedAt().toString());
-        m.put("runningArgs", runningArgs.isEmpty() ? null : runningArgs);
-        m.put("drift", !runningArgs.isEmpty() && !sameTokens(runningArgs, args));
+        String runningEnv = envLine(statusService.lastEnviron());
+        ModelConfigInfo m = new ModelConfigInfo();
+        m.setArgs(args);
+        m.setEnv(env);
+        m.setSource(row.getSource());
+        m.setUpdatedAt(row.getUpdatedAt() == null ? null : row.getUpdatedAt().toString());
+        m.setRunningArgs(runningArgs.isEmpty() ? null : runningArgs);
+        m.setRunningEnv(runningEnv.isEmpty() ? null : runningEnv);
+        m.setDrift(!runningArgs.isEmpty()
+                && (!sameTokens(runningArgs, args) || !envMapsEqual(parseEnvMap(runningEnv), parseEnvMap(env))));
         return m;
     }
 
-    /** 保存完整参数行（校验 + diff），返回归一化参数行与 diff。 */
-    public Map<String, Object> save(String args, String source) {
+    /** 保存完整参数行 + 环境变量行（校验 + diff），返回归一化结果与 diff。 */
+    public ConfigSaveResult save(String args, String env, String source) {
         validateArgs(args);
-        String normalized = normalize(args);
-        String oldArgs = currentArgs();
-        List<Map<String, Object>> diff = diffArgs(oldArgs, normalized);
-        upsertRow(normalized, source);
-        Map<String, Object> m = new LinkedHashMap<>();
-        m.put("args", normalized);
-        m.put("source", source);
-        m.put("diff", diff);
+        validateEnv(env);
+        String normalizedArgs = normalize(args);
+        String normalizedEnv = normalize(env);
+        ConfigSaveResult m = new ConfigSaveResult();
+        m.setArgs(normalizedArgs);
+        m.setEnv(normalizedEnv);
+        m.setSource(source);
+        m.setDiff(diffAll(currentArgs(), currentEnv(), normalizedArgs, normalizedEnv));
+        upsertRow(normalizedArgs, normalizedEnv, source);
         return m;
     }
 
-    /** 从运行进程 cmdline 提取完整参数行，diff 后落库（source=snapshot）。 */
-    public Map<String, Object> snapshot() {
+    /** 从运行进程 cmdline + environ 快照参数行与环境变量行，diff 后落库（source=snapshot）。 */
+    public ModelSnapshotResult snapshot() {
         String cmdline = statusService.lastCmdline();
         if (cmdline == null || cmdline.isBlank()) {
             throw new ApiException(409, "模型未运行，无法从服务器快照参数");
@@ -100,13 +124,15 @@ public class ModelConfigService {
         if (fullArgs.isEmpty()) {
             throw new ApiException(502, "cmdline 中未解析到有效参数");
         }
-        String oldArgs = currentArgs();
-        List<Map<String, Object>> diff = diffArgs(oldArgs, fullArgs);
-        upsertRow(fullArgs, "snapshot");
-        Map<String, Object> m = new LinkedHashMap<>();
-        m.put("args", fullArgs);
-        m.put("source", "snapshot");
-        m.put("diff", diff);
+        // 服务端只信任白名单内且词法合法的变量，其余静默丢弃（绝不抛异常）
+        String fullEnv = sanitizeServerEnv(statusService.lastEnviron());
+        ModelSnapshotResult m = new ModelSnapshotResult();
+        m.setArgs(fullArgs);
+        m.setEnv(fullEnv);
+        m.setSource("snapshot");
+        m.setDiff(diffAll(currentArgs(), currentEnv(), fullArgs, fullEnv));
+        m.setRuntimeFacts(fetchRuntimeFacts());
+        upsertRow(fullArgs, fullEnv, "snapshot");
         return m;
     }
 
@@ -116,9 +142,28 @@ public class ModelConfigService {
         return row == null ? defaultArgs : argsFromJson(row.getConfigJson());
     }
 
+    /** 供启动脚本生成使用：当前环境变量行（无记录时为空，脚本回退 yml 的 cuda-device）。 */
+    public String currentEnv() {
+        ModelConfig row = mapper.findRow(1L);
+        return row == null ? "" : envFromJson(row.getConfigJson());
+    }
+
     /** 参数行 → 启动脚本多行格式（与模板 {{ARGS}} 位置对齐）。 */
     public String formatForScript(String args) {
         return String.join(" \\\n        ", tokenize(args));
+    }
+
+    /** 环境变量行 → 启动脚本 export 行（与模板 {{ENV}} 位置对齐），空行返回空串。 */
+    public String formatForScriptEnv(String env) {
+        Map<String, String> m = parseEnvMap(env);
+        if (m.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (Map.Entry<String, String> e : m.entrySet()) {
+            sb.append("export ").append(e.getKey()).append("=\"").append(e.getValue()).append("\"\n");
+        }
+        return sb.toString().stripTrailing();
     }
 
     /** 校验完整参数行：只允许安全 flag/value 词法（防注入）。 */
@@ -141,6 +186,41 @@ public class ModelConfigService {
                     throw new ApiException(400, "参数 " + t + " 的值不合法: " + v);
                 }
                 i++;
+            }
+        }
+    }
+
+    /** 校验环境变量行：K=V 结构，key 限白名单前缀，value 限安全字符（防注入）。 */
+    public static void validateEnv(String env) {
+        if (env == null || env.trim().isEmpty()) {
+            return;
+        }
+        if (env.length() > MAX_ENV_LEN) {
+            throw new ApiException(400, "环境变量行过长（上限 " + MAX_ENV_LEN + " 字符）");
+        }
+        for (String token : tokenize(env)) {
+            int eq = token.indexOf('=');
+            if (eq <= 0) {
+                throw new ApiException(400, "环境变量必须为 K=V 形式: " + token);
+            }
+            String key = token.substring(0, eq);
+            String value = token.substring(eq + 1);
+            if (!ENV_KEY_RE.matcher(key).matches()) {
+                throw new ApiException(400, "环境变量名不合法: " + key);
+            }
+            boolean allowed = false;
+            for (String prefix : ENV_KEY_PREFIXES) {
+                if (key.startsWith(prefix)) {
+                    allowed = true;
+                    break;
+                }
+            }
+            if (!allowed) {
+                throw new ApiException(400, "环境变量 " + key + " 不在纳管白名单内（"
+                        + String.join("/", ENV_KEY_PREFIXES) + "）");
+            }
+            if (!ENV_VALUE_RE.matcher(value).matches()) {
+                throw new ApiException(400, "环境变量 " + key + " 的值不合法: " + value);
             }
         }
     }
@@ -190,6 +270,134 @@ public class ModelConfigService {
         }
     }
 
+    /** config_json → env 环境变量行（旧记录无 env 键时为空）。 */
+    public static String envFromJson(String json) {
+        try {
+            Map<String, Object> m = new ObjectMapper().readValue(json, new TypeReference<LinkedHashMap<String, Object>>() {
+            });
+            Object a = m.get("env");
+            return a == null ? "" : String.valueOf(a);
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /** 环境变量行 → 有序 K→V 映射，用于 diff 与比较。 */
+    static Map<String, String> parseEnvMap(String env) {
+        Map<String, String> m = new LinkedHashMap<>();
+        if (env == null) {
+            return m;
+        }
+        for (String token : tokenize(env)) {
+            int eq = token.indexOf('=');
+            if (eq > 0) {
+                m.put(token.substring(0, eq), token.substring(eq + 1));
+            }
+        }
+        return m;
+    }
+
+    /** Map → "K=V K=V" 行（保持插入序）。 */
+    static String envLine(Map<String, String> m) {
+        if (m == null || m.isEmpty()) {
+            return "";
+        }
+        List<String> parts = new ArrayList<>();
+        for (Map.Entry<String, String> e : m.entrySet()) {
+            parts.add(e.getKey() + "=" + e.getValue());
+        }
+        return String.join(" ", parts);
+    }
+
+    static boolean envMapsEqual(Map<String, String> a, Map<String, String> b) {
+        return a.equals(b);
+    }
+
+    /** 服务端 environ 中的变量逐个过白名单与词法校验，不合法的静默丢弃。 */
+    static String sanitizeServerEnv(Map<String, String> env) {
+        if (env == null) {
+            return "";
+        }
+        List<String> kept = new ArrayList<>();
+        for (Map.Entry<String, String> e : env.entrySet()) {
+            String token = e.getKey() + "=" + e.getValue();
+            try {
+                validateEnv(token);
+                kept.add(token);
+            } catch (ApiException ignored) {
+            }
+        }
+        return String.join(" ", kept);
+    }
+
+    /** 参数行 + 环境变量行的合并 diff（kind 区分 arg / env）。 */
+    private List<DiffItem> diffAll(String oldArgs, String oldEnv, String newArgs, String newEnv) {
+        List<DiffItem> diff = new ArrayList<>();
+        for (DiffItem d : diffArgs(oldArgs, newArgs)) {
+            d.setKind("arg");
+            diff.add(d);
+        }
+        Map<String, String> o = parseEnvMap(oldEnv);
+        Map<String, String> n = parseEnvMap(newEnv);
+        for (Map.Entry<String, String> e : n.entrySet()) {
+            if (!e.getValue().equals(o.get(e.getKey()))) {
+                diff.add(envDiffItem(e.getKey(), o.get(e.getKey()), e.getValue()));
+            }
+        }
+        for (String k : o.keySet()) {
+            if (!n.containsKey(k)) {
+                diff.add(envDiffItem(k, o.get(k), null));
+            }
+        }
+        return diff;
+    }
+
+    private DiffItem envDiffItem(String key, String oldValue, String newValue) {
+        DiffItem d = new DiffItem();
+        d.setKind("env");
+        d.setFlag(key);
+        d.setOld(oldValue);
+        d.setNew(newValue);
+        return d;
+    }
+
+    /** 最近一次启动的日志事实行（llama.log 中最后一个 "llama-server starting:" 之后匹配关键词的行）。 */
+    public List<String> fetchRuntimeFacts() {
+        try {
+            SshService.ExecResult res = ssh.exec(factsCommand(), 10);
+            if (!res.ok()) {
+                return List.of();
+            }
+            List<String> facts = new ArrayList<>();
+            for (String line : res.output().split("\n")) {
+                line = line.trim();
+                if (line.startsWith("FACT:")) {
+                    line = line.substring("FACT:".length()).trim();
+                    if (!line.isEmpty()) {
+                        facts.add(line);
+                    }
+                    if (facts.size() >= MAX_FACTS) {
+                        break;
+                    }
+                }
+            }
+            return facts;
+        } catch (Exception e) {
+            log.warn("fetch runtime facts failed: {}", e.toString());
+            return List.of();
+        }
+    }
+
+    private String factsCommand() {
+        String logFile = props.logFile();
+        return "last=$(grep -n 'llama-server starting:' '" + logFile + "' 2>/dev/null | tail -1 | cut -d: -f1); "
+                + "[ -n \"$last\" ] || last=1; "
+                + "tail -n +\"$last\" '" + logFile + "' 2>/dev/null"
+                + " | grep -m " + MAX_FACTS + " -E '" + FACT_PATTERN + "'"
+                + " | cut -c1-400"
+                + " | while IFS= read -r l; do printf 'FACT:%s\\n' \"$l\"; done";
+    }
+
     public static List<String> tokenize(String s) {
         List<String> tokens = new ArrayList<>();
         for (String t : s.trim().split("\\s+")) {
@@ -218,27 +426,32 @@ public class ModelConfigService {
         return m;
     }
 
+    /** 给定参数行/环境变量行与当前配置的合并 diff（版本预览用，不落库）。 */
+    public List<DiffItem> diffWith(String args, String env) {
+        return diffAll(currentArgs(), currentEnv(), args, env);
+    }
+
     /** 参数级 diff：flag 级新增/修改/删除（old 或 new 为 null 表示另一侧不存在）。 */
-    public List<Map<String, Object>> diffArgs(String oldArgs, String newArgs) {
+    public List<DiffItem> diffArgs(String oldArgs, String newArgs) {
         Map<String, String> o = parseFragment(oldArgs);
         Map<String, String> n = parseFragment(newArgs);
-        List<Map<String, Object>> diff = new ArrayList<>();
+        List<DiffItem> diff = new ArrayList<>();
         for (Map.Entry<String, String> e : n.entrySet()) {
             String ov = o.get(e.getKey());
             if (!e.getValue().equals(ov)) {
-                Map<String, Object> d = new LinkedHashMap<>();
-                d.put("flag", e.getKey());
-                d.put("old", ov == null ? null : ov);
-                d.put("new", e.getValue());
+                DiffItem d = new DiffItem();
+                d.setFlag(e.getKey());
+                d.setOld(ov);
+                d.setNew(e.getValue());
                 diff.add(d);
             }
         }
         for (String k : o.keySet()) {
             if (!n.containsKey(k)) {
-                Map<String, Object> d = new LinkedHashMap<>();
-                d.put("flag", k);
-                d.put("old", o.get(k));
-                d.put("new", null);
+                DiffItem d = new DiffItem();
+                d.setFlag(k);
+                d.setOld(o.get(k));
+                d.setNew(null);
                 diff.add(d);
             }
         }
@@ -278,17 +491,17 @@ public class ModelConfigService {
         return row;
     }
 
-    private void upsertRow(String args, String source) {
+    private void upsertRow(String args, String env, String source) {
         ModelConfig row = mapper.findRow(1L);
         if (row == null) {
             row = new ModelConfig();
             row.setId(1L);
-            row.setConfigJson(toJson(Map.of("args", args)));
+            row.setConfigJson(toJson(Map.of("args", args, "env", env)));
             row.setSource(source);
             row.setUpdatedAt(LocalDateTime.now());
             mapper.insertRow(row);
         } else {
-            row.setConfigJson(toJson(Map.of("args", args)));
+            row.setConfigJson(toJson(Map.of("args", args, "env", env)));
             row.setSource(source);
             row.setUpdatedAt(LocalDateTime.now());
             mapper.updateRow(row);

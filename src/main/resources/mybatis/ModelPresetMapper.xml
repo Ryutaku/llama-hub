@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.llama.hub.mapper.ModelPresetMapper">
+
+    <select id="findAll" resultType="com.llama.hub.model.ModelPreset">
+        SELECT id, name, note, config_json, source, created_at
+        FROM model_preset
+        ORDER BY created_at DESC, id DESC
+    </select>
+
+    <select id="findById" resultType="com.llama.hub.model.ModelPreset">
+        SELECT id, name, note, config_json, source, created_at
+        FROM model_preset
+        WHERE id = #{id}
+    </select>
+
+    <select id="findByName" resultType="com.llama.hub.model.ModelPreset">
+        SELECT id, name, note, config_json, source, created_at
+        FROM model_preset
+        WHERE name = #{name}
+    </select>
+
+    <insert id="insertRow" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO model_preset (name, note, config_json, source, created_at)
+        VALUES (#{name}, #{note}, #{configJson}, #{source}, #{createdAt})
+    </insert>
+
+    <update id="updateRow">
+        UPDATE model_preset
+        SET name = #{name},
+            note = #{note}
+        WHERE id = #{id}
+    </update>
+
+    <delete id="deleteRow">
+        DELETE FROM model_preset WHERE id = #{id}
+    </delete>
+
+</mapper>

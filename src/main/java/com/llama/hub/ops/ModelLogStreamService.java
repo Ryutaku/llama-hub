@@ -1,9 +1,8 @@
 package com.llama.hub.ops;
 
+import lombok.extern.slf4j.Slf4j;
 import com.llama.hub.config.OpsProperties;
 import net.schmizz.sshj.connection.channel.direct.Session;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -20,9 +19,9 @@ import java.util.concurrent.atomic.AtomicReference;
  * 客户端断开必须关闭 channel，防止 185 侧进程/通道泄漏。
  */
 @Service
+@Slf4j
 public class ModelLogStreamService {
 
-    private static final Logger log = LoggerFactory.getLogger(ModelLogStreamService.class);
 
     private final SshService ssh;
     private final OpsProperties props;
