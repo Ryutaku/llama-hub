@@ -92,6 +92,11 @@ select option {
   pointer-events: none;
 }
 
+/* 弹窗面板必须不透明，避免背后内容透出（.panel-tech 的半透明渐变只适合页面卡片） */
+.modal-pop.panel-tech {
+  background: linear-gradient(180deg, #18253a 0%, #0d1421 42%);
+}
+
 /* ---- 荧光输入框（1px 边框 + 聚焦青色辉光，与登录表单一致） ---- */
 .glow-input {
   border: 1px solid var(--color-gh-border);
