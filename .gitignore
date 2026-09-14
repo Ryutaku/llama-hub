@@ -1,0 +1,21 @@
+# 构建产物
+target/
+src/main/resources/static/
+
+# 前端依赖
+frontend/node_modules/
+
+# 数据库文件（含 API Key 哈希等敏感数据，禁止入库）
+data/*.mv.db
+data/*.mv.db.*
+
+# 日志
+logs/
+*.log
+
+# 系统/编辑器
+.DS_Store
+Thumbs.db
+.idea/
+*.iml
+.vscode/

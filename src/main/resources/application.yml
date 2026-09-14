@@ -1,0 +1,40 @@
+server:
+  port: 18443
+  servlet:
+    session:
+      timeout: 30m
+      cookie:
+        http-only: true
+        same-site: strict
+
+spring:
+  datasource:
+    url: jdbc:h2:file:./data/llm-gateway.mv.db
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+  jackson:
+    time-zone: Asia/Shanghai
+  mvc:
+    async:
+      request-timeout: -1
+
+gateway:
+  upstream: http://192.168.2.185:18082
+  key:
+    encryption-key: llm-gateway-default   # 密钥明文副本的 AES 加密密钥，建议通过环境变量覆盖
+  log:
+    retention-days: 90
+    body-enabled: false
+  admin:
+    allowed-ips: ""
+
+logging:
+  file:
+    name: logs/llm-gateway.log
+  level:
+    com.gateway: INFO
