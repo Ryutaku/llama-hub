@@ -21,6 +21,7 @@ llama-hub（目录名 llama-hub，artifact 名 llama-hub）是 185 模型服务�
 
 ## 运行与部署约定
 
+- **部署服务器：内网开发服务器 189**（`192.168.2.189:22`，root 免密），部署目录 `/home/monitor/deployments/llama-hub`；185 只是模型上游与模型运维 SSH 目标，不是本项目部署位置
 - 服务端口 18443；对外经 nginx 9090 反代（SSE 必须 `proxy_buffering off`）
 - 分离打包：jar（仅 class）+ `lib/` + `resources/`（application.yml + static/）平级，PropertiesLauncher，`java -jar llama-hub.jar` 零参数启动，不加启动参数
 - 前端改动必须先 `npm run build` 再 `mvn package`；静态产物不进 jar，在 `resources/static/`

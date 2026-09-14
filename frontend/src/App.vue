@@ -139,24 +139,25 @@ onUnmounted(() => {
     <!-- Main -->
     <div v-else-if="authed" class="min-h-screen">
       <header class="app-header sticky top-0 z-40">
-        <div class="w-full px-4 h-12 flex items-center gap-5">
-          <div class="font-mono font-bold text-base whitespace-nowrap flex items-center gap-2.5 tracking-[0.08em] select-none">
+        <div class="w-full px-3 sm:px-4 h-12 flex items-center gap-2 sm:gap-4">
+          <div class="font-mono font-bold text-base whitespace-nowrap flex items-center gap-2 sm:gap-2.5 tracking-[0.08em] select-none">
             <span class="brand-badge">
               <i class="fa-solid fa-bolt-lightning"></i>
             </span>
             <span class="brand-text">llama-hub</span>
-            <span class="brand-tag">GW·CONSOLE</span>
+            <span class="brand-tag hidden sm:inline-block">GW·CONSOLE</span>
           </div>
-          <nav class="flex items-center gap-0.5 text-sm flex-1">
+          <nav class="flex items-center gap-0.5 text-sm flex-1 min-w-0">
             <button
               v-for="t in tabs"
               :key="t.key"
-              class="btn-ripple px-3 py-1.5 rounded-lg transition-all duration-200 active:scale-95"
+              class="btn-ripple px-2.5 sm:px-3 py-1.5 rounded-lg whitespace-nowrap transition-all duration-200 active:scale-95"
               :class="tab === t.key
                 ? 'nav-active'
                 : 'text-gh-muted hover:text-gh-text hover:bg-gh-cyan/5 active:bg-gh-cyan/10'"
+              :title="t.label"
               @click="tab = t.key"
-            ><i :class="t.icon" class="mr-1.5"></i>{{ t.label }}</button>
+            ><i :class="t.icon" class="lg:mr-1.5"></i><span class="hidden lg:inline">{{ t.label }}</span></button>
           </nav>
 
           <!-- upstream health indicator -->
@@ -172,9 +173,9 @@ onUnmounted(() => {
           <!-- user menu -->
           <div class="relative">
             <button
-              class="text-sm text-gh-muted hover:text-gh-text px-3 py-1.5 rounded-md hover:bg-gh-cyan/5 transition-all duration-150 active:scale-95 active:bg-gh-cyan/10"
+              class="text-sm text-gh-muted hover:text-gh-text px-2.5 sm:px-3 py-1.5 rounded-md hover:bg-gh-cyan/5 transition-all duration-150 active:scale-95 active:bg-gh-cyan/10"
               @click="showUserMenu = !showUserMenu"
-            ><i class="fa-solid fa-user-large mr-1"></i>{{ username }} ▾</button>
+            ><i class="fa-solid fa-user-large"></i><span class="hidden sm:inline ml-1">{{ username }} ▾</span></button>
             <div
               v-if="showUserMenu"
               class="modal-pop absolute right-0 mt-1 w-40 bg-gh-panel border border-gh-border rounded-md shadow-xl py-0.5 text-sm"

@@ -24,7 +24,17 @@ const canStartModel = computed(() => !['RUNNING', 'STARTING'].includes(status.va
 
 let eventsEs = null
 let logsEs = null
+let tickTimer = null
 const MAX_LOGS = 2000
+
+const nowTs = ref(Date.now())
+const statusTs = ref(0)
+
+const uptimeNow = computed(() => {
+  const s = status.value
+  if (!s || s.uptimeSec == null) return null
+  return s.uptimeSec + Math.max(0, Math.floor((nowTs.value - statusTs.value) / 1000))
+})
 
 const STATE_META = {
   RUNNING: { label: '运行中', cls: 'bg-gh-green text-[#04121a] shadow-[0_0_16px_-2px_rgba(25,181,132,0.8)]', icon: 'fa-solid fa-play-circle' },
@@ -57,6 +67,7 @@ function lineClass(line) {
 async function loadStatus() {
   try {
     status.value = await api.modelStatus()
+    statusTs.value = Date.now()
   } catch (e) {
     /* ignore */
   }
@@ -125,7 +136,7 @@ async function doSnapshot() {
     const r = await api.modelSnapshot()
     runtimeFacts.value = r.runtimeFacts || []
     if (!r.diff || r.diff.length === 0) {
-      toast('快照完成：服务器参数与环境变量与当前配置一致', 'success')
+      toast('快照完成：服务器参数与环境变量与下次启动配置一致', 'success')
       await loadConfig()
     } else {
       pendingDiff.value = r.diff
@@ -242,6 +253,7 @@ function connectEvents() {
   eventsEs.addEventListener('state', e => {
     try {
       status.value = JSON.parse(e.data)
+      statusTs.value = Date.now()
     } catch (err) {
       /* ignore */
     }
@@ -259,10 +271,12 @@ onMounted(() => {
   loadPresets()
   connectEvents()
   connectLogs()
+  tickTimer = setInterval(() => { nowTs.value = Date.now() }, 1000)
 })
 onUnmounted(() => {
   if (eventsEs) eventsEs.close()
   if (logsEs) logsEs.close()
+  if (tickTimer) clearInterval(tickTimer)
 })
 </script>
 
@@ -276,9 +290,9 @@ onUnmounted(() => {
           <i :class="STATE_META[status?.state]?.icon || 'fa-solid fa-question-circle'"></i>
           {{ STATE_META[status?.state]?.label || '未知' }}
         </span>
-        <div class="text-sm text-gh-muted space-x-4">
+        <div class="text-sm text-gh-muted flex flex-wrap items-center gap-x-4 gap-y-1">
           <span v-if="status?.pid != null"><i class="fa-solid fa-hashtag mr-1"></i>PID {{ status.pid }}</span>
-          <span v-if="status?.uptimeSec != null"><i class="fa-solid fa-stopwatch mr-1"></i>运行 {{ fmtUptime(status.uptimeSec) }}</span>
+          <span v-if="uptimeNow != null"><i class="fa-solid fa-stopwatch mr-1"></i>运行 {{ fmtUptime(uptimeNow) }}</span>
           <span :class="status?.healthOk ? 'text-gh-green' : ''"><i class="fa-solid fa-heartbeat mr-1"></i>health {{ status?.healthOk ? '正常' : '不可达' }}</span>
           <span><i class="fa-solid fa-plug mr-1"></i>端口 {{ status?.portListening ? '监听中' : '未监听' }}</span>
           <span v-if="status && !status.sshAvailable" class="text-gh-red"><i class="fa-solid fa-plug-circle-xmark mr-1"></i>SSH 断开</span>
@@ -330,7 +344,7 @@ onUnmounted(() => {
         <span
           v-if="config?.drift"
           class="px-2 py-0.5 rounded-full text-xs font-semibold bg-gh-orange/10 text-gh-orange border border-gh-orange/40"
-          title="服务器运行进程的参数/环境变量与当前配置不一致，可用「从服务器快照」覆盖"
+          title="服务器运行进程的参数/环境变量与下次启动配置不一致，可用「从服务器快照」覆盖"
         ><i class="fa-solid fa-exclamation mr-1"></i>运行参数/环境变量与配置不一致</span>
         <div class="ml-auto flex items-center gap-2">
           <button
@@ -346,29 +360,34 @@ onUnmounted(() => {
           ><i class="fa-solid fa-bookmark mr-1.5"></i>保存为版本</button>
         </div>
       </div>
-      <p class="text-xs text-gh-muted mb-2">
-        llama-server 完整启动参数行（不含二进制路径），任意参数可自由增删改（每行一个参数或连续书写均可）。
-        状态探测的端口跟随 <code class="font-mono">--port</code>；保存为版本并应用后重启生效。
-      </p>
-      <textarea
-        v-model="argsText"
-        spellcheck="false"
-        rows="20"
-        class="glow-input w-full font-mono text-xs leading-5 p-3 rounded-md bg-[#161b22] text-[#e6edf3] resize-y"
-      ></textarea>
-
-      <p class="text-xs text-gh-muted mt-3 mb-2">
-        <i class="fa-solid fa-envelope-open-text mr-1 text-gh-cyan"></i>环境变量（每行一个 K=V）
-        仅纳管白名单前缀：CUDA_VISIBLE_DEVICES / NVIDIA_* / GGML_* / LLAMA_* / OMP_* / MKL_*。
-        网关启动时渲染为脚本 export 行；CUDA_VISIBLE_DEVICES 决定可用显卡，未配置时回退系统默认。
-      </p>
-      <textarea
-        v-model="envText"
-        spellcheck="false"
-        rows="4"
-        placeholder="CUDA_VISIBLE_DEVICES=0,1,2"
-        class="glow-input w-full font-mono text-xs leading-5 p-3 rounded-md bg-[#161b22] text-[#e6edf3] resize-y"
-      ></textarea>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div>
+          <p class="text-xs text-gh-muted mb-2">
+            <i class="fa-solid fa-sliders-h mr-1 text-gh-cyan"></i>启动参数行（不含二进制路径），任意参数可自由增删改（每行一个参数或连续书写均可）。
+            状态探测的端口跟随 <code class="font-mono">--port</code>；保存为版本并应用后重启生效。
+          </p>
+          <textarea
+            v-model="argsText"
+            spellcheck="false"
+            rows="18"
+            class="glow-input w-full font-mono text-xs leading-5 p-3 rounded-md bg-[#161b22] text-[#e6edf3] resize-y"
+          ></textarea>
+        </div>
+        <div>
+          <p class="text-xs text-gh-muted mb-2">
+            <i class="fa-solid fa-envelope-open-text mr-1 text-gh-cyan"></i>环境变量（每行一个 K=V）
+            仅纳管白名单前缀：CUDA_VISIBLE_DEVICES / NVIDIA_* / GGML_* / LLAMA_* / OMP_* / MKL_*。
+            网关启动时渲染为脚本 export 行；CUDA_VISIBLE_DEVICES 决定可用显卡，未配置时回退系统默认。
+          </p>
+          <textarea
+            v-model="envText"
+            spellcheck="false"
+            rows="18"
+            placeholder="CUDA_VISIBLE_DEVICES=0,1,2"
+            class="glow-input w-full font-mono text-xs leading-5 p-3 rounded-md bg-[#161b22] text-[#e6edf3] resize-y"
+          ></textarea>
+        </div>
+      </div>
 
       <div v-if="config?.runningArgs" class="mt-2 text-xs text-gh-muted">
         <span class="font-medium"><i class="fa-solid fa-bolt-lightning mr-1"></i>当前运行参数：</span>
@@ -391,31 +410,30 @@ onUnmounted(() => {
     <div v-show="paramTab === 'presets'" class="panel-tech p-4">
       <div class="flex items-center gap-3 mb-3 flex-wrap">
         <h2 class="font-semibold text-base"><i class="fa-solid fa-bookmark mr-1.5 text-gh-cyan"></i>参数版本</h2>
-        <span class="text-xs text-gh-muted">满意的一组参数存为版本，随时应用或直接按版本启动</span>
+        <span class="text-xs text-gh-muted">满意的一组参数存为版本，随时应用或直接按版本启动。「下次启动配置」= 下次启动模型将使用的参数；「运行中」= 服务器当前进程正在使用的参数</span>
       </div>
       <div v-if="presets.length === 0" class="py-4 text-center text-xs text-gh-muted border border-dashed border-gh-border rounded-md">
         还没有版本。在「启动参数」页编辑满意后，点「保存为版本」留档。
       </div>
         <div v-else class="space-y-2">
           <div v-for="p in presets" :key="p.id" class="border border-gh-border rounded-md bg-[#0a111d] px-3 py-2">
-            <div class="flex items-center gap-3 flex-wrap">
+            <div class="flex items-center gap-2 flex-wrap">
               <span class="font-semibold text-sm">{{ p.name }}</span>
-              <span v-if="p.isCurrent" class="px-1.5 py-0.5 rounded-full text-[11px] font-semibold bg-gh-green/10 text-gh-green border border-gh-green/40">当前配置</span>
-              <span v-if="p.isRunning" class="px-1.5 py-0.5 rounded-full text-[11px] font-semibold bg-gh-cyan/10 text-gh-cyan border border-gh-cyan/40">运行中</span>
-              <span v-if="p.note" class="text-xs text-gh-muted">{{ p.note }}</span>
+              <span v-if="p.isCurrent" class="px-1.5 py-0.5 rounded-full text-[11px] font-semibold bg-gh-green/10 text-gh-green border border-gh-green/40 cursor-help" title="保存在 model_config 中：下次启动模型将使用这组参数与环境变量">下次启动配置</span>
+              <span v-if="p.isRunning" class="px-1.5 py-0.5 rounded-full text-[11px] font-semibold bg-gh-cyan/10 text-gh-cyan border border-gh-cyan/40 cursor-help" title="服务器当前运行中的模型进程，其参数/环境变量与该版本一致">运行中</span>
               <span class="text-xs text-gh-muted font-mono ml-auto">{{ (p.createdAt || '').replace('T', ' ') }}</span>
-            </div>
-            <div class="flex items-center gap-1.5 mt-2">
+              <div class="flex items-center gap-1.5">
               <button
                 class="px-2.5 h-[26px] rounded-md text-xs font-semibold border border-gh-border bg-[#0e1624] text-gh-text hover:border-gh-cyan/50 hover:text-gh-cyan transition-all active:scale-95"
                 title="查看该版本的完整参数行与环境变量"
                 @click="openPresetModal('view', p)"
               ><i class="fa-solid fa-eye mr-1"></i>查看</button>
-              <button
-                class="px-2.5 h-[26px] rounded-md text-xs font-semibold border border-gh-border bg-[#0e1624] text-gh-text hover:border-gh-cyan/50 hover:text-gh-cyan transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
-                :disabled="!!busy || p.isCurrent"
-                @click="openPresetModal('apply', p)"
-              ><i class="fa-solid fa-paper-plane mr-1"></i>应用</button>
+               <button
+                 class="px-2.5 h-[26px] rounded-md text-xs font-semibold border border-gh-border bg-[#0e1624] text-gh-text hover:border-gh-cyan/50 hover:text-gh-cyan transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+                 :disabled="!!busy || p.isCurrent"
+                 :title="p.isCurrent ? '与下次启动配置相同，无需应用' : '将该版本的完整参数行与环境变量行设为下次启动配置，不影响运行中的进程，重启模型后生效'"
+                 @click="openPresetModal('apply', p)"
+               ><i class="fa-solid fa-paper-plane mr-1"></i>应用</button>
               <button
                 class="px-2.5 h-[26px] rounded-md text-xs font-semibold border border-gh-green/70 bg-gh-green/10 text-gh-green hover:bg-gh-green/20 transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
                 :disabled="!!busy || !canStartModel"
@@ -431,8 +449,10 @@ onUnmounted(() => {
                 class="px-2.5 h-[26px] rounded-md text-xs font-semibold border border-gh-red/70 bg-gh-red/10 text-gh-red hover:bg-gh-red/20 transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
                 :disabled="!!busy"
                 @click="openPresetModal('delete', p)"
-              ><i class="fa-solid fa-trash mr-1"></i>删除</button>
+               ><i class="fa-solid fa-trash mr-1"></i>删除</button>
+              </div>
             </div>
+            <p v-if="p.note" class="text-xs text-gh-muted mt-1.5 break-all">{{ p.note }}</p>
           </div>
         </div>
       </div>
@@ -525,8 +545,8 @@ onUnmounted(() => {
         <template v-if="presetModal.mode === 'view'">
           <div class="flex items-center gap-2 mb-2 flex-wrap">
             <span class="text-xs text-gh-muted font-mono"><i class="fa-solid fa-clock mr-1"></i>创建 {{ (presetModal.createdAt || '').replace('T', ' ') }}</span>
-            <span v-if="presetModal.isCurrent" class="px-1.5 py-0.5 rounded-full text-[11px] font-semibold bg-gh-green/10 text-gh-green border border-gh-green/40">当前配置</span>
-            <span v-if="presetModal.isRunning" class="px-1.5 py-0.5 rounded-full text-[11px] font-semibold bg-gh-cyan/10 text-gh-cyan border border-gh-cyan/40">运行中</span>
+            <span v-if="presetModal.isCurrent" class="px-1.5 py-0.5 rounded-full text-[11px] font-semibold bg-gh-green/10 text-gh-green border border-gh-green/40 cursor-help" title="保存在 model_config 中：下次启动模型将使用这组参数与环境变量">下次启动配置</span>
+            <span v-if="presetModal.isRunning" class="px-1.5 py-0.5 rounded-full text-[11px] font-semibold bg-gh-cyan/10 text-gh-cyan border border-gh-cyan/40 cursor-help" title="服务器当前运行中的模型进程，其参数/环境变量与该版本一致">运行中</span>
           </div>
           <p v-if="presetModal.note" class="text-xs text-gh-muted mb-3">{{ presetModal.note }}</p>
           <label class="block text-xs text-gh-muted mb-1">启动参数（完整参数行）</label>
@@ -538,10 +558,10 @@ onUnmounted(() => {
 
         <template v-if="presetModal.mode === 'apply' || presetModal.mode === 'start'">
           <p class="text-xs text-gh-muted mb-2">
-            相对当前配置的变更（{{ presetModal.diff.length }} 项）：
+            相对下次启动配置的变更（{{ presetModal.diff.length }} 项）：
           </p>
           <div v-if="presetModal.diff.length === 0" class="text-sm text-gh-green py-3 text-center border border-gh-border rounded-md">
-            与当前配置完全一致
+            与下次启动配置一致
           </div>
           <div v-else class="max-h-60 overflow-auto border border-gh-border rounded-md">
             <table class="w-full text-sm">
@@ -564,7 +584,7 @@ onUnmounted(() => {
             </table>
           </div>
           <p v-if="presetModal.mode === 'start'" class="text-xs text-gh-muted mt-2">
-            <i class="fa-solid fa-info-circle mr-1"></i>将覆盖当前配置并立即启动模型（约需数分钟加载）。
+            <i class="fa-solid fa-info-circle mr-1"></i>将覆盖下次启动配置并立即启动模型（约需数分钟加载）。
           </p>
         </template>
 

@@ -218,8 +218,8 @@ function barColor(bar) {
 
     <p v-if="error" class="text-gh-red text-sm mb-4">{{ error }}</p>
 
-    <div class="panel-tech overflow-hidden">
-      <table class="w-full text-sm">
+    <div class="panel-tech overflow-x-auto">
+      <table class="w-full min-w-[920px] text-sm">
         <thead>
           <tr class="border-b border-gh-border bg-gh-tag/60 text-left text-xs text-gh-muted">
             <th class="px-3 py-2">名称</th>

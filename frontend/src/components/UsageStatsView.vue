@@ -95,8 +95,8 @@ function fmtSpeed(v) {
 
     <p v-if="error" class="text-gh-red text-sm mb-3">{{ error }}</p>
 
-    <div v-if="result" class="panel-tech overflow-hidden">
-      <table class="w-full text-sm">
+    <div v-if="result" class="panel-tech overflow-x-auto">
+      <table class="w-full min-w-[880px] text-sm">
         <thead>
           <tr class="border-b border-gh-border bg-gh-tag/60 text-left text-xs text-gh-muted">
             <th class="px-3 py-2">Key 名称</th>
