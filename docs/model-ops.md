@@ -1,8 +1,8 @@
-# 模型运维控制台设计（llama-gateway 扩展）
+# 模型运维控制台设计（llama-hub 扩展）
 
 ## 背景
 
-llama-gateway 已实现 API Key 网关（认证/限额/调用日志/仪表盘），上游是 185 的 llama-server。目前模型的启停靠人工 SSH 执行 `/home/llama-cpp/start.sh` / `stop.sh`，参数修改要手改脚本，日志要 SSH 上去 tail。
+llama-hub 已实现 API Key 网关（认证/限额/调用日志/仪表盘），上游是 185 的 llama-server。目前模型的启停靠人工 SSH 执行 `/home/llama-cpp/start.sh` / `stop.sh`，参数修改要手改脚本，日志要 SSH 上去 tail。
 
 本设计把「模型运维控制台」扩展进现有项目：启动/停止模型、修改启动参数、实时查看日志，与网关共享同一个上游状态视图。
 
@@ -12,14 +12,14 @@ llama-gateway 已实现 API Key 网关（认证/限额/调用日志/仪表盘）
 
 - 网关转发前必须知道模型存活（决定转发还是 503），面板展示的也是同一份状态；拆两个进程会出现两份 SSH 连接和两份状态缓存
 - 现有 `UpstreamHealthService`（30s 探测 `/health` + 内存状态）直接升级为完整状态机，网关 503 判断与面板状态卡共用
-- 数据面/管理面隔离：ops 代码独立子包 `com.gateway.ops`，独立线程池执行 SSH 慢操作，不阻塞 WebClient 转发路径
+- 数据面/管理面隔离：ops 代码独立子包 `com.llama.hub.ops`，独立线程池执行 SSH 慢操作，不阻塞 WebClient 转发路径
 
 ```
  浏览器(管理页)                          业务客户端
    │ /api/admin/model/**                   │ /v1/* (API Key)
    ▼                                       ▼
 ┌────────────────────────────────────────────────────────┐
-│ llama-gateway :18443                                   │
+│ llama-hub :18443                                   │
 │                                                        │
 │  ProxyController/ProxyService (WebClient, SSE 透传)     │
 │  ModelOpsController ── ModelOpsService ──┐             │
@@ -33,7 +33,7 @@ llama-gateway 已实现 API Key 网关（认证/限额/调用日志/仪表盘）
    185: llama-server :18082, /home/llama-cpp/logs/llama.log
 ```
 
-## 模块设计（com.gateway.ops）
+## 模块设计（com.llama.hub.ops）
 
 - `SshService`：sshj 常驻 `Session`（root@192.168.2.185:22），提供 `exec(cmd, timeout)` 一次性执行与 `openChannel()` 长通道；断线指数退避重连；所有调用走独立 `opsExecutor` 线程池
 - `ModelStatusService`：在现有 `UpstreamHealthService` 基础上扩展：

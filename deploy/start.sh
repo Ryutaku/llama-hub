@@ -8,7 +8,7 @@ if [ -f app.pid ] && kill -0 "$(cat app.pid)" 2>/dev/null; then
 fi
 mkdir -p logs
 nohup /usr/local/jdk-21.0.8/bin/java \
-  -jar llm-gateway.jar \
+  -jar llama-hub.jar \
   > logs/console.out 2>&1 &
 echo $! > app.pid
 echo "started pid=$(cat app.pid)"

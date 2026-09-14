@@ -1,6 +1,6 @@
 let onUnauthorized = null
 
-const BASE = '/llm-gateway'
+const BASE = '/llama-hub'
 
 export function setUnauthorizedHandler(fn) {
   onUnauthorized = fn

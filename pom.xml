@@ -11,10 +11,10 @@
         <relativePath/>
     </parent>
 
-    <groupId>com.gateway</groupId>
-    <artifactId>llm-gateway</artifactId>
+    <groupId>com.llama.hub</groupId>
+    <artifactId>llama-hub</artifactId>
     <version>1.0.0</version>
-    <name>llm-gateway</name>
+    <name>llama-hub</name>
     <description>API Gateway in front of llama-server</description>
 
     <properties>
@@ -61,7 +61,7 @@
     </dependencies>
 
     <build>
-        <finalName>llm-gateway</finalName>
+        <finalName>llama-hub</finalName>
         <!-- 分离部署（参照 token-dashboard 模式）：jar 里只有 class，
              依赖外置 lib/、配置和静态资源外置 resources/，java -jar 零参数启动 -->
         <resources>
@@ -89,7 +89,7 @@
                     <archive>
                         <manifest>
                             <!-- 指定入口类（repackage 后变 Start-Class，Main-Class 换 PropertiesLauncher） -->
-                            <mainClass>com.gateway.GatewayApplication</mainClass>
+                            <mainClass>com.llama.hub.GatewayApplication</mainClass>
                         </manifest>
                         <manifestEntries>
                             <!-- MANIFEST.MF 中 Class-Path 加入外置资源目录 -->
@@ -150,7 +150,7 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
-                    <mainClass>com.gateway.GatewayApplication</mainClass>
+                    <mainClass>com.llama.hub.GatewayApplication</mainClass>
                     <!-- 重写包含依赖，包含不存在的依赖，jar 里没有 pom 里的依赖 -->
                     <includes>
                         <include>

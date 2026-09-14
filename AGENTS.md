@@ -1,8 +1,8 @@
-# llama-gateway 项目说明
+# llama-hub 项目说明
 
 ## 项目定位
 
-llama-gateway（目录名 llama-gateway，artifact 名 llm-gateway）是 185 模型服务（llama-server，Swift-Qwen3.8-27B）的 OpenAI 兼容 API 网关与运维控制台：
+llama-hub（目录名 llama-hub，artifact 名 llama-hub）是 185 模型服务（llama-server，Swift-Qwen3.8-27B）的 OpenAI 兼容 API 网关与运维控制台：
 
 - 网关（数据面）：`/v1/*` 反向代理转发到 `http://192.168.2.185:18082`，含 API Key 认证、用量限额、调用日志统计
 - 管理界面：Vue 3 SPA（GitHub Light 风格）：仪表盘、API Keys、调用日志、审计日志
@@ -12,7 +12,7 @@ llama-gateway（目录名 llama-gateway，artifact 名 llm-gateway）是 185 模
 
 - JDK 21
 - Spring Boot 4.1.0：starter-web + starter-webflux（WebClient 做代理转发与 SSE 透传）
-- 持久化：Spring Data JPA + H2 文件模式（`./data/llm-gateway.mv.db`，`ddl-auto: update`）；本项目不引入 MyBatis/MySQL
+- 持久化：Spring Data JPA + H2 文件模式（`./data/llama-hub.mv.db`，`ddl-auto: update`）；本项目不引入 MyBatis/MySQL
 - 密码：spring-security-crypto（BCrypt）；Key 明文副本 AES 加密存储
 - SSH（模型运维用）：sshj（纯 Java），不使用 JSch
 - 前端：Vue 3 + Vite + Tailwind CSS，GitHub Light 主题，无 vue-router（Tab 切换）
@@ -21,15 +21,15 @@ llama-gateway（目录名 llama-gateway，artifact 名 llm-gateway）是 185 模
 ## 运行与部署约定
 
 - 服务端口 18443；对外经 nginx 9090 反代（SSE 必须 `proxy_buffering off`）
-- 分离打包：jar（仅 class）+ `lib/` + `resources/`（application.yml + static/）平级，PropertiesLauncher，`java -jar llm-gateway.jar` 零参数启动，不加启动参数
+- 分离打包：jar（仅 class）+ `lib/` + `resources/`（application.yml + static/）平级，PropertiesLauncher，`java -jar llama-hub.jar` 零参数启动，不加启动参数
 - 前端改动必须先 `npm run build` 再 `mvn package`；静态产物不进 jar，在 `resources/static/`
-- 日志：`logs/llm-gateway.log`
+- 日志：`logs/llama-hub.log`
 - 可配置项在 `resources/application.yml` 的 `gateway.*` 段：`upstream`、`key.encryption-key`（建议环境变量覆盖）、`log.retention-days`、`log.body-enabled`、`admin.allowed-ips`
 
 ## 包与模块约定
 
-- 统一包名 `com.gateway`：config / controller / filter / model / repository / service / util / web
-- 模型运维扩展代码放独立子包 `com.gateway.ops`（service/controller 各入子包），不得与数据面代理代码（ProxyService、ApiKeyAuthFilter）互相缠绕
+- 统一包名 `com.llama.hub`：config / controller / filter / model / repository / service / util / web
+- 模型运维扩展代码放独立子包 `com.llama.hub.ops`（service/controller 各入子包），不得与数据面代理代码（ProxyService、ApiKeyAuthFilter）互相缠绕
 - 管理端 API 一律 `/api/admin/**` 前缀，复用现有会话认证（AdminSessionFilter）与 IP 白名单（IpWhitelistFilter），不为运维功能另开鉴权通道
 
 ## 后端服务器 185

@@ -1,11 +1,11 @@
-# llm-gateway 设计文档
+# llama-hub 设计文档
 
 ## 概述
 
 在 llama-server 前加一层 Spring Boot 网关服务，提供 API Key 认证、管理界面和反向代理。
 
 ```
-客户端 ──(API Key)──> nginx :9090 ──> llm-gateway:18443 ──> llama-server:192.168.2.185:18082
+客户端 ──(API Key)──> nginx :9090 ──> llama-hub:18443 ──> llama-server:192.168.2.185:18082
                                           │
                                      管理界面 (Web UI)
 ```
@@ -16,7 +16,7 @@
 |----|------|------|
 | 框架 | Spring Boot 4.1.0 | 最新正式版（Spring Framework 7，Java 17+ stack） |
 | Java | 21（LTS） | 服务器已部署 /usr/local/jdk-21.0.8，启动快、虚拟线程/MVC async 表现佳 |
-| 数据库 | H2 内嵌（文件模式） | 零配置，单文件 `./data/llm-gateway.mv.db` |
+| 数据库 | H2 内嵌（文件模式） | 零配置，单文件 `./data/llama-hub.mv.db` |
 | 前端 | Vue 3 + Vite + Tailwind CSS | 组件化开发 + 热更新；构建产物外置 `resources/static/`（不进 jar），前端更新只传静态目录 |
 | 反向代理 | Spring WebClient | 支持 SSE 流式转发（llama-server 的 streaming）；body 在 exchangeToMono 回调内消费，避免连接释放时丢弃响应 |
 | 构建 | Maven | 分离打包（纯 class jar + lib/ + resources/，PropertiesLauncher，`java -jar` 零参数启动） |
@@ -272,28 +272,28 @@ CREATE INDEX idx_audit_log_time ON audit_log(created_at DESC);
 cd frontend && npm install && npm run build   # 产物输出到 src/main/resources/static/
 mvn package
 # 分离打包产物（token-dashboard 模式：jar 里只有 class，无任何资源）：
-#   target/llm-gateway.jar        可执行 jar（纯 class，manifest 为 PropertiesLauncher +
+#   target/llama-hub.jar        可执行 jar（纯 class，manifest 为 PropertiesLauncher +
 #                                 Class-Path ./resources/ + Loader-Path resources/,lib/，~340KB，更新只传它）
 #   target/lib/*.jar              运行期依赖（maven-dependency-plugin 拷贝，116 个，不含 lombok）
 #   target/resources/             外置资源（application.yml + static/ 前端产物）
 
 # 开发模式
-cd frontend && npm run dev                    # Vite 热更新，/llm-gateway 代理到 :18443
+cd frontend && npm run dev                    # Vite 热更新，/llama-hub 代理到 :18443
 mvn spring-boot:run                           # 注意 static/ 不进 target/classes，开发期前端由 Vite 提供
 
 # 服务器目录（分离部署：主 jar + lib + resources）
-/home/monitor/deployments/llm-gateway/
-├── llm-gateway.jar           # 可执行 jar（纯 class，java -jar 零参数启动，后端更新只传这个，~340KB）
+/home/monitor/deployments/llama-hub/
+├── llama-hub.jar           # 可执行 jar（纯 class，java -jar 零参数启动，后端更新只传这个，~340KB）
 ├── lib/                      # 运行期依赖（116 个 jar，不含 lombok，基本不变，装一次）
 ├── resources/
 │   ├── application.yml       # 外置配置（唯一配置来源，jar 内不打包配置）
 │   └── static/               # 前端构建产物（前端更新只传这个目录，不用重启）
-├── data/llm-gateway.mv.db    # H2 数据文件
-├── logs/llm-gateway.log
+├── data/llama-hub.mv.db    # H2 数据文件
+├── logs/llama-hub.log
 └── start.sh / stop.sh
 
 # 启动方式（start.sh）：零参数
-# java -jar llm-gateway.jar
+# java -jar llama-hub.jar
 # 原理：spring-boot-maven-plugin 用 <layout>ZIP</layout> + null 依赖技巧重打包，入口为
 # PropertiesLauncher，按 manifest 的 Loader-Path 把外置 lib/（依赖）、resources/（配置+静态页面）
 # 挂进类路径，Spring 经 classpath 天然加载 application.yml 和 static/，与启动目录无关
@@ -306,7 +306,7 @@ mvn spring-boot:run                           # 注意 static/ 不进 target/cla
 --gateway.admin.allowed-ips=             # 管理端 IP 白名单（CIDR），空 = 不限制
 
 # nginx 反向代理（对外端口 9090）
-/etc/nginx/conf.d/llm-gateway.conf:
+/etc/nginx/conf.d/llama-hub.conf:
 server {
     listen 9090;
     client_max_body_size 50m;
@@ -339,7 +339,7 @@ server {
 ## 项目结构
 
 ```
-llm-gateway/
+llama-hub/
 ├── pom.xml                                # 打包前需先构建前端
 ├── frontend/                              # Vue 3 + Vite + Tailwind
 │   ├── package.json
@@ -358,7 +358,7 @@ llm-gateway/
 │           ├── UsageStatsView.vue         # 按 Key + 日期区间统计 token 用量
 │           ├── AuditLogsView.vue          # 审计日志
 │           └── ChangePasswordModal.vue
-├── src/main/java/com/gateway/
+├── src/main/java/com/llama/hub/
 │   ├── GatewayApplication.java
 │   ├── config/
 │   │   ├── WebClientConfig.java

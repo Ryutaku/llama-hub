@@ -3,7 +3,7 @@ import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
-  base: '/llm-gateway/',
+  base: '/llama-hub/',
   plugins: [vue(), tailwindcss()],
   build: {
     outDir: '../src/main/resources/static',
@@ -11,10 +11,10 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/llm-gateway': {
+      '/llama-hub': {
         target: 'http://127.0.0.1:18443',
         changeOrigin: true,
-        rewrite: (p) => p.replace(/^\/llm-gateway/, '')
+        rewrite: (p) => p.replace(/^\/llama-hub/, '')
       }
     }
   }
