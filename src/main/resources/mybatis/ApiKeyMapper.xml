@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.llama.hub.mapper.ApiKeyMapper">
+
+    <sql id="allColumns">
+        id, name, key_hash, key_prefix, expires_at, token_quota, request_quota,
+        tokens_used, requests_used, is_active, created_at, last_used_at, hit_count, key_plain
+    </sql>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO api_key (name, key_hash, key_prefix, expires_at, token_quota, request_quota,
+                             tokens_used, requests_used, is_active, created_at, last_used_at, hit_count, key_plain)
+        VALUES (#{name}, #{keyHash}, #{keyPrefix}, #{expiresAt}, #{tokenQuota}, #{requestQuota},
+                #{tokensUsed}, #{requestsUsed}, #{isActive}, #{createdAt}, #{lastUsedAt}, #{hitCount}, #{keyPlain})
+    </insert>
+
+    <select id="findById" resultType="com.llama.hub.model.ApiKey">
+        SELECT <include refid="allColumns"/>
+        FROM api_key
+        WHERE id = #{id}
+    </select>
+
+    <select id="findByKeyHash" resultType="com.llama.hub.model.ApiKey">
+        SELECT <include refid="allColumns"/>
+        FROM api_key
+        WHERE key_hash = #{keyHash}
+    </select>
+
+    <select id="findAll" resultType="com.llama.hub.model.ApiKey">
+        SELECT <include refid="allColumns"/>
+        FROM api_key
+        ORDER BY created_at DESC
+    </select>
+
+    <update id="update">
+        UPDATE api_key
+        SET name = #{name},
+            expires_at = #{expiresAt},
+            token_quota = #{tokenQuota},
+            request_quota = #{requestQuota},
+            tokens_used = #{tokensUsed},
+            requests_used = #{requestsUsed},
+            is_active = #{isActive},
+            last_used_at = #{lastUsedAt},
+            hit_count = #{hitCount}
+        WHERE id = #{id}
+    </update>
+
+    <delete id="deleteById">
+        DELETE FROM api_key WHERE id = #{id}
+    </delete>
+
+</mapper>

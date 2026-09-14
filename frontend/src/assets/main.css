@@ -1,23 +1,25 @@
 @import "tailwindcss";
 
 @theme {
-  --color-gh-bg: #ffffff;
-  --color-gh-panel: #f6f8fa;
-  --color-gh-border: #d0d7de;
-  --color-gh-text: #24292f;
-  --color-gh-muted: #59636e;
-  --color-gh-green: #1f883d;
-  --color-gh-blue: #0969da;
-  --color-gh-tag: #eaeef2;
-  --color-gh-red: #cf222e;
-  --color-gh-orange: #9a6700;
+  --color-gh-bg: #090e17;
+  --color-gh-panel: #0e1624;
+  --color-gh-border: #1f2e45;
+  --color-gh-text: #d9e4f2;
+  --color-gh-muted: #7e90a9;
+  --color-gh-green: #19b584;
+  --color-gh-blue: #3d8bfd;
+  --color-gh-cyan: #22d3ee;
+  --color-gh-tag: #142032;
+  --color-gh-red: #f0455c;
+  --color-gh-orange: #f5a623;
 
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --font-sans: -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", Helvetica, Arial, sans-serif;
+  --font-mono: "Cascadia Code", "Cascadia Mono", ui-monospace, SFMono-Regular, "SF Mono", Consolas, Menlo, monospace;
 }
 
 .font-xh {
-  font-family: "Microsoft YaHei", "微软雅黑", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+  font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
+  letter-spacing: 0.02em;
 }
 
 /* 预留滚动条空间：切换标签页时内容高度变化不会引起整体布局横向位移 */
@@ -26,14 +28,131 @@ html {
 }
 
 body {
-  background-color: #ffffff;
+  background-color: #090e17;
   background-image:
-    radial-gradient(1100px 300px at 50% -80px, rgba(31, 136, 61, 0.055), transparent 70%),
-    radial-gradient(800px 300px at 100% 0, rgba(9, 105, 218, 0.04), transparent 70%);
+    radial-gradient(1200px 520px at 12% -10%, rgba(34, 211, 238, 0.07), transparent 60%),
+    radial-gradient(1000px 520px at 100% 0%, rgba(25, 181, 132, 0.05), transparent 60%),
+    radial-gradient(900px 460px at 50% 118%, rgba(61, 139, 253, 0.05), transparent 60%);
   background-repeat: no-repeat;
-  color: #24292f;
+  color: #d9e4f2;
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+}
+
+/* 全局坐标网格底纹 */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(34, 211, 238, 0.028) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(34, 211, 238, 0.028) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.9), rgba(0, 0, 0, 0.35) 60%, transparent 95%);
+  -webkit-mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.9), rgba(0, 0, 0, 0.35) 60%, transparent 95%);
+}
+
+#app {
+  position: relative;
+  z-index: 1;
+}
+
+::selection {
+  background: rgba(34, 211, 238, 0.3);
+  color: #eaf6ff;
+}
+
+select option {
+  background-color: #0e1624;
+  color: #d9e4f2;
+}
+
+/* ---- 科技面板 ---- */
+.panel-tech {
+  position: relative;
+  background:
+    linear-gradient(180deg, rgba(24, 37, 58, 0.45), rgba(13, 20, 33, 0.92) 42%);
+  border: 1px solid var(--color-gh-border);
+  border-radius: 12px;
+  box-shadow:
+    inset 0 1px 0 rgba(140, 180, 240, 0.07),
+    0 10px 28px -20px rgba(0, 0, 0, 0.9);
+}
+.panel-tech::before {
+  content: '';
+  position: absolute;
+  left: 10%;
+  right: 10%;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(34, 211, 238, 0.5), transparent);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+/* ---- 图标芯片 ---- */
+.chip {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  flex: 0 0 auto;
+}
+.chip-cyan {
+  color: #22d3ee;
+  background: rgba(34, 211, 238, 0.1);
+  border: 1px solid rgba(34, 211, 238, 0.28);
+}
+.chip-green {
+  color: #19b584;
+  background: rgba(25, 181, 132, 0.1);
+  border: 1px solid rgba(25, 181, 132, 0.28);
+}
+.chip-amber {
+  color: #f5a623;
+  background: rgba(245, 166, 35, 0.1);
+  border: 1px solid rgba(245, 166, 35, 0.28);
+}
+.chip-red {
+  color: #f0455c;
+  background: rgba(240, 69, 92, 0.1);
+  border: 1px solid rgba(240, 69, 92, 0.28);
+}
+.chip-slate {
+  color: #7e90a9;
+  background: rgba(126, 144, 169, 0.1);
+  border: 1px solid rgba(126, 144, 169, 0.28);
+}
+.chip-blue {
+  color: #3d8bfd;
+  background: rgba(61, 139, 253, 0.1);
+  border: 1px solid rgba(61, 139, 253, 0.28);
+}
+
+/* ---- 数字辉光 ---- */
+.num-glow {
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 16px rgba(34, 211, 238, 0.22);
+}
+
+/* ---- 呼吸状态灯 ---- */
+.dot-live {
+  box-shadow: 0 0 10px 2px currentColor;
+  animation: dot-breathe 2.6s ease-in-out infinite;
+}
+@keyframes dot-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
 }
 
 /* ---- 全局按钮点击反馈 ---- */
@@ -61,25 +180,25 @@ button:focus-visible,
 a:focus-visible,
 input:focus-visible,
 select:focus-visible {
-  outline: 2px solid #0969da;
+  outline: 2px solid #22d3ee;
   outline-offset: 1px;
 }
 
 /* 实心主按钮按下时加深 + 内阴影 */
 .btn-solid:active:not(:disabled) {
-  filter: brightness(0.92);
-  box-shadow: inset 0 2px 4px rgb(0 0 0 / 0.18);
+  filter: brightness(0.9);
+  box-shadow: inset 0 2px 4px rgb(0 0 0 / 0.35);
 }
 
 /* 描边 / 幽灵按钮按下时背景加深 */
 .btn-ghost:active:not(:disabled),
 .btn-outline:active:not(:disabled) {
-  filter: brightness(0.95);
+  filter: brightness(1.15);
 }
 
 /* 文字型操作按钮：按下给一个 pill 背景，避免“点了没反应” */
 .btn-link:active:not(:disabled) {
-  background-color: #eaeef2;
+  background-color: #1a2942;
   border-radius: 6px;
 }
 
@@ -167,11 +286,13 @@ select:focus-visible {
   .btn-ripple .ripple-ink,
   .btn-busy::after,
   .toast-enter,
-  .modal-pop {
+  .modal-pop,
+  .dot-live {
     animation: none;
   }
 }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: #d0d7de; border-radius: 5px; }
+::-webkit-scrollbar-thumb { background: #223349; border-radius: 5px; }
+::-webkit-scrollbar-thumb:hover { background: #2d4260; }
 ::-webkit-scrollbar-track { background: transparent; }

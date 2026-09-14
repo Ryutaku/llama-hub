@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.llama.hub.mapper.CallLogMapper">
+
+    <sql id="allColumns">
+        id, key_id, key_name, request_id, endpoint, model, prompt_tokens, completion_tokens,
+        total_tokens, cached_tokens, cache_hit_rate, tokens_per_sec, started_at, duration_ms,
+        status_code, error_msg, request_body, response_body
+    </sql>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO call_log (key_id, key_name, request_id, endpoint, model, prompt_tokens,
+                              completion_tokens, total_tokens, cached_tokens, cache_hit_rate,
+                              tokens_per_sec, started_at, duration_ms, status_code, error_msg,
+                              request_body, response_body)
+        VALUES (#{keyId}, #{keyName}, #{requestId}, #{endpoint}, #{model}, #{promptTokens},
+                #{completionTokens}, #{totalTokens}, #{cachedTokens}, #{cacheHitRate},
+                #{tokensPerSec}, #{startedAt}, #{durationMs}, #{statusCode}, #{errorMsg},
+                #{requestBody}, #{responseBody})
+    </insert>
+
+    <select id="selectList" resultType="com.llama.hub.model.CallLog">
+        SELECT <include refid="allColumns"/>
+        FROM call_log
+        <where>
+            <if test="keyId != null">AND key_id = #{keyId}</if>
+            <if test="startAt != null">AND started_at &gt;= #{startAt}</if>
+            <if test="endAt != null">AND started_at &lt; #{endAt}</if>
+        </where>
+        ORDER BY started_at DESC
+    </select>
+
+    <select id="count" resultType="long">
+        SELECT COUNT(*)
+        FROM call_log
+        <where>
+            <if test="keyId != null">AND key_id = #{keyId}</if>
+            <if test="startAt != null">AND started_at &gt;= #{startAt}</if>
+            <if test="endAt != null">AND started_at &lt; #{endAt}</if>
+        </where>
+    </select>
+
+    <delete id="deleteOlderThan">
+        DELETE FROM call_log WHERE started_at &lt; #{cutoff}
+    </delete>
+
+</mapper>

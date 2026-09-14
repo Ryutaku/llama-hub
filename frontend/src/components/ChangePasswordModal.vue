@@ -40,7 +40,7 @@ async function submit() {
 
 <template>
   <div class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4" @click.self="emit('close')">
-    <div class="modal-pop bg-gh-bg border border-gh-border rounded-lg w-full max-w-sm p-4 shadow-xl">
+    <div class="modal-pop panel-tech w-full max-w-sm p-4">
       <h3 class="font-semibold text-base mb-3">修改密码</h3>
       <label class="block text-xs text-gh-muted mb-1">旧密码</label>
       <input v-model="oldPwd" type="password" autocomplete="current-password" class="input mb-3" />
@@ -62,16 +62,18 @@ async function submit() {
 <style scoped>
 .input {
   width: 100%;
-  padding: 4px 8px;
+  padding: 6px 10px;
   font-size: 12px;
   line-height: 20px;
-  background: #ffffff;
-  border: 1px solid #d0d7de;
+  background: #0a111d;
+  border: 1px solid var(--color-gh-border);
   border-radius: 6px;
-  color: #24292f;
+  color: var(--color-gh-text);
   outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .input:focus {
-  border-color: #0969da;
+  border-color: #22d3ee;
+  box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.14);
 }
 </style>

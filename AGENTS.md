@@ -12,7 +12,8 @@ llama-hub（目录名 llama-hub，artifact 名 llama-hub）是 185 模型服务�
 
 - JDK 21
 - Spring Boot 4.1.0：starter-web + starter-webflux（WebClient 做代理转发与 SSE 透传）
-- 持久化：Spring Data JPA + H2 文件模式（`./data/llama-hub.mv.db`，`ddl-auto: update`）；本项目不引入 MyBatis/MySQL
+- 持久化：MyBatis（`mybatis-spring-boot-starter` 3.0.5，SQL 全部在 `src/main/resources/mybatis/*.xml`）+ PageHelper（`pagehelper-spring-boot-starter` 2.1.0，h2 方言）+ H2 文件模式（`./data/llama-hub.mv.db`）；建表 SQL 在 `mybatis/SchemaMapper.xml`，启动时幂等执行（`SchemaInitializer`）
+- MyBatis 为显式装配（`config/MyBatisConfig`：SqlSessionFactory + DataSourceTransactionManager + MapperScannerConfigurer + PageInterceptor）：Spring Boot 4 的自动配置求值时序与 mybatis-spring-boot starter 不兼容（`@ConditionalOnSingleCandidate(DataSource)` 评估不到 DataSource bean），不要改回自动装配
 - 密码：spring-security-crypto（BCrypt）；Key 明文副本 AES 加密存储
 - SSH（模型运维用）：sshj（纯 Java），不使用 JSch
 - 前端：Vue 3 + Vite + Tailwind CSS，GitHub Light 主题，无 vue-router（Tab 切换）
@@ -28,7 +29,7 @@ llama-hub（目录名 llama-hub，artifact 名 llama-hub）是 185 模型服务�
 
 ## 包与模块约定
 
-- 统一包名 `com.llama.hub`：config / controller / filter / model / repository / service / util / web
+- 统一包名 `com.llama.hub`：config / controller / filter / mapper / model / service / util / web
 - 模型运维扩展代码放独立子包 `com.llama.hub.ops`（service/controller 各入子包），不得与数据面代理代码（ProxyService、ApiKeyAuthFilter）互相缠绕
 - 管理端 API 一律 `/api/admin/**` 前缀，复用现有会话认证（AdminSessionFilter）与 IP 白名单（IpWhitelistFilter），不为运维功能另开鉴权通道
 
@@ -43,8 +44,8 @@ llama-hub（目录名 llama-hub，artifact 名 llama-hub）是 185 模型服务�
 ## 模型运维约定
 
 - 停止：走 185 现有 `stop.sh` 的语义，不发明新停止方式
-- 启动：网关按参数配置生成参数化启动脚本推送到 `/home/llama-cpp/start-gateway.sh`，复用 start.sh 的 flock / PID 文件 / 日志归档机制，只替换参数段；不拼超长内联命令
-- 参数：唯一来源是 H2 `model_config` 表；UI 明示「重启后生效」；提供「从服务器快照」（解析运行进程 cmdline，防漂移）
+- 启动：网关按参数配置生成参数化启动脚本推送到 `/home/llama-cpp/start-gateway.sh`，复用 start.sh 的 flock / PID 文件 / 日志归档机制，exec 的参数部分整段渲染参数行（模板不注入任何 flag）；不拼超长内联命令
+- 参数：存「完整参数行」（llama-server 全部参数，含 -m/-mm/--host/--port，可自由增删改），唯一来源是 H2 `model_config` 表；UI 明示「重启后生效」；提供「从服务器快照」（解析运行进程 cmdline，防漂移）；状态探测与脚本模板的端口/模型路径从参数行解析 `--port`/`-m`/`-mm`（缺失回退 `gateway.model.*`）
 - 已知漂移：2026-09-14 运行进程为 `-ts 36,30 -sm layer --ubatch-size 1024`，与 start.sh（`-sm none` 无 `-ts`、ubatch 512）不一致；快照以运行进程为准
 - 状态判定以「PID 文件 + `/proc/<pid>/cmdline` + 端口监听 + `/health`」组合作准，单看 PID 文件不够
 - SSH 断连期间状态标记 UNKNOWN，不触发任何启停动作

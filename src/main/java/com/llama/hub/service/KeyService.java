@@ -1,7 +1,7 @@
 package com.llama.hub.service;
 
+import com.llama.hub.mapper.ApiKeyMapper;
 import com.llama.hub.model.ApiKey;
-import com.llama.hub.repository.ApiKeyRepository;
 import com.llama.hub.util.ApiKeyUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,14 +22,14 @@ public class KeyService {
 
     private static final Logger log = LoggerFactory.getLogger(KeyService.class);
 
-    private final ApiKeyRepository apiKeyRepository;
+    private final ApiKeyMapper apiKeyMapper;
 
     /** 加密钥（AES），用于存储可重看的明文副本；可通过环境变量覆盖 */
     @Value("${gateway.key.encryption-key:llm-gateway-default}")
     private String encryptionKey;
 
-    public KeyService(ApiKeyRepository apiKeyRepository) {
-        this.apiKeyRepository = apiKeyRepository;
+    public KeyService(ApiKeyMapper apiKeyMapper) {
+        this.apiKeyMapper = apiKeyMapper;
     }
 
     @Transactional
@@ -49,7 +49,7 @@ public class KeyService {
         key.setTokensUsed(0L);
         key.setRequestsUsed(0L);
         key.setHitCount(0L);
-        apiKeyRepository.save(key);
+        apiKeyMapper.insert(key);
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("key", plain);
@@ -60,8 +60,10 @@ public class KeyService {
     @Transactional
     public Map<String, Object> update(Long id, Integer number, String unit,
                                       Boolean isActive, Long tokenQuota, Long requestQuota) {
-        ApiKey key = apiKeyRepository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("key not found"));
+        ApiKey key = apiKeyMapper.findById(id);
+        if (key == null) {
+            throw new IllegalArgumentException("key not found");
+        }
         if (number != null && unit != null) {
             key.setExpiresAt(expireFrom(number, unit, LocalDateTime.now()));
         }
@@ -74,20 +76,22 @@ public class KeyService {
         if (requestQuota != null) {
             key.setRequestQuota(validateQuota(requestQuota));
         }
-        apiKeyRepository.save(key);
+        apiKeyMapper.update(key);
         return toDto(key);
     }
 
     @Transactional
     public void delete(Long id) {
-        apiKeyRepository.deleteById(id);
+        apiKeyMapper.deleteById(id);
     }
 
     /** 解密返回密钥明文副本；未保存明文（老 Key）返回 null */
     @Transactional
     public String reveal(Long id) {
-        ApiKey key = apiKeyRepository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("key not found"));
+        ApiKey key = apiKeyMapper.findById(id);
+        if (key == null) {
+            throw new IllegalArgumentException("key not found");
+        }
         if (key.getKeyPlain() == null || key.getKeyPlain().isEmpty()) {
             return null;
         }
@@ -95,14 +99,14 @@ public class KeyService {
     }
 
     public List<Map<String, Object>> list() {
-        return apiKeyRepository.findAll().stream()
+        return apiKeyMapper.findAll().stream()
                 .sorted((a, b) -> b.getCreatedAt().compareTo(a.getCreatedAt()))
                 .map(this::toDto)
                 .collect(Collectors.toList());
     }
 
     public ApiKey findById(Long id) {
-        return apiKeyRepository.findById(id).orElse(null);
+        return apiKeyMapper.findById(id);
     }
 
     public String statusOf(ApiKey k) {

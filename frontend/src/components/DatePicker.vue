@@ -164,18 +164,19 @@ export default {
 <style scoped>
 .dp-input {
   width: 150px;
-  padding: 4px 8px;
+  height: 30px;
+  padding: 0 8px;
   font-size: 12px;
-  line-height: 20px;
-  background: #ffffff;
-  border: 1px solid #d0d7de;
+  background: #0a111d;
+  border: 1px solid var(--color-gh-border);
   border-radius: 6px;
-  color: #24292f;
+  color: var(--color-gh-text);
   outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .dp-input:focus {
-  border-color: #0969da;
-  box-shadow: 0 0 0 3px rgba(9, 105, 218, 0.3);
+  border-color: #22d3ee;
+  box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.18);
 }
 
 .dp-popover {
@@ -186,10 +187,12 @@ export default {
   margin-top: 4px;
   width: 268px;
   padding: 10px;
-  border: 1px solid #8c959f;
-  border-radius: 6px;
-  background-color: #ffffff;
-  box-shadow: 0 8px 24px rgba(140, 149, 159, 0.28);
+  border: 1px solid rgba(34, 211, 238, 0.25);
+  border-radius: 10px;
+  background-color: #0e1624;
+  box-shadow:
+    0 16px 40px -12px rgba(0, 0, 0, 0.7),
+    0 0 24px -10px rgba(34, 211, 238, 0.3);
 }
 
 .dp-header {
@@ -202,25 +205,26 @@ export default {
 .dp-title {
   font-weight: 600;
   font-size: 14px;
-  color: #24292f;
+  color: var(--color-gh-text);
 }
 
 .dp-nav {
   width: 28px;
   height: 28px;
-  border: 1px solid #d0d7de;
+  border: 1px solid var(--color-gh-border);
   border-radius: 6px;
-  background-color: #ffffff;
-  color: #24292f;
+  background-color: #0a111d;
+  color: var(--color-gh-text);
   cursor: pointer;
-  transition: transform 0.12s ease, background-color 0.15s ease;
+  transition: transform 0.12s ease, background-color 0.15s ease, border-color 0.15s ease;
 }
 .dp-nav:hover {
-  background-color: #f6f8fa;
+  border-color: rgba(34, 211, 238, 0.45);
+  background-color: #101c2e;
 }
 .dp-nav:active {
   transform: scale(0.9);
-  background-color: #eaeef2;
+  background-color: #16233a;
 }
 
 .dp-weekdays,
@@ -232,7 +236,7 @@ export default {
 
 .dp-weekdays {
   margin-bottom: 4px;
-  color: #59636e;
+  color: var(--color-gh-muted);
   font-size: 12px;
   text-align: center;
 }
@@ -241,29 +245,32 @@ export default {
   height: 30px;
   border: 1px solid transparent;
   border-radius: 6px;
-  background-color: #ffffff;
-  color: #24292f;
+  background-color: transparent;
+  color: var(--color-gh-text);
   font-size: 13px;
   cursor: pointer;
-  transition: transform 0.12s ease, background-color 0.15s ease, border-color 0.15s ease;
+  transition: transform 0.12s ease, background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .dp-day:hover {
-  border-color: #d0d7de;
-  background-color: #f6f8fa;
+  border-color: rgba(34, 211, 238, 0.3);
+  background-color: #101c2e;
 }
 .dp-day:active {
   transform: scale(0.88);
-  background-color: #eaeef2;
+  background-color: #16233a;
 }
 .dp-day.muted {
-  color: #8c959f;
+  color: #4d5f78;
 }
 .dp-day.today {
-  border-color: #0969da;
+  border-color: rgba(34, 211, 238, 0.55);
+  color: #7deffc;
 }
 .dp-day.selected {
-  color: #ffffff;
-  border-color: #0969da;
-  background-color: #0969da;
+  color: #04121a;
+  border-color: transparent;
+  background: var(--color-gh-green);
+  font-weight: 600;
+  box-shadow: 0 0 12px -2px rgba(34, 211, 238, 0.65);
 }
 </style>

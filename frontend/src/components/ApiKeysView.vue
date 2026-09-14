@@ -218,10 +218,10 @@ function barColor(bar) {
 
     <p v-if="error" class="text-gh-red text-sm mb-4">{{ error }}</p>
 
-    <div class="bg-gh-panel border border-gh-border rounded-lg overflow-hidden">
+    <div class="panel-tech overflow-hidden">
       <table class="w-full text-sm">
         <thead>
-          <tr class="border-b border-gh-border text-left text-xs text-gh-muted">
+          <tr class="border-b border-gh-border bg-gh-tag/60 text-left text-xs text-gh-muted">
             <th class="px-3 py-2">名称</th>
             <th class="px-3 py-2">Key</th>
             <th class="px-3 py-2">有效期</th>
@@ -237,7 +237,7 @@ function barColor(bar) {
           <tr v-if="!loading && keys.length === 0">
             <td colspan="9" class="px-4 py-10 text-center text-gh-muted">暂无 API Key，点击右上角“新建 Key”创建</td>
           </tr>
-          <tr v-for="k in keys" :key="k.id" class="border-b border-gh-border/50 hover:bg-gh-tag/40">
+          <tr v-for="k in keys" :key="k.id" class="border-b border-gh-border/40 hover:bg-gh-cyan/5 transition-colors">
             <td class="px-3 py-2 font-medium">{{ k.name }}</td>
             <td class="px-3 py-2 font-mono text-xs text-gh-muted">{{ k.keyPrefix }}…</td>
             <td class="px-3 py-2 text-xs text-gh-muted">{{ fmtExpiry(k.expiresAt) }}</td>
@@ -270,7 +270,7 @@ function barColor(bar) {
                 class="btn-link px-1 py-0.5 mr-3 hover:underline transition-all duration-150 active:scale-90 active:bg-gh-tag rounded"
                 :class="k.isActive ? 'text-gh-orange' : 'text-gh-green'"
                 @click="toggleActive(k)"
-              ><i :class="k.isActive ? 'fa-solid fa-ban' : 'fa-solid fa-circle-check'" class="mr-0.5"></i>{{ k.isActive ? '禁用' : '启用' }}</button>
+              ><i :class="k.isActive ? 'fa-solid fa-minus-circle' : 'fa-solid fa-circle-check'" class="mr-0.5"></i>{{ k.isActive ? '禁用' : '启用' }}</button>
               <button class="btn-link px-1 py-0.5 text-gh-red hover:underline transition-all duration-150 active:scale-90 active:bg-gh-red/10 rounded" @click="doDelete(k)"><i class="fa-solid fa-trash-can mr-0.5"></i>删除</button>
             </td>
           </tr>
@@ -281,7 +281,7 @@ function barColor(bar) {
     <!-- create modal -->
     <div v-if="showCreate" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4"
       @click.self="showCreate = false">
-      <div class="modal-pop bg-gh-bg border border-gh-border rounded-lg w-full max-w-md p-4 shadow-xl">
+      <div class="modal-pop panel-tech w-full max-w-md p-4">
         <h3 class="font-semibold text-base mb-3">新建 API Key</h3>
         <label class="block text-xs text-gh-muted mb-1">名称</label>
         <input v-model="form.name" placeholder="如：vscode-claude" class="input mb-3" />
@@ -295,7 +295,7 @@ function barColor(bar) {
               <i class="fa-solid fa-chevron-down text-[10px] text-gh-muted"></i>
             </button>
             <div v-if="unitOpen === 'create'"
-              class="absolute right-0 top-full mt-1 w-full bg-white border border-gh-border rounded-md shadow-lg z-30 py-1 max-h-48 overflow-auto">
+              class="absolute right-0 top-full mt-1 w-full bg-gh-panel border border-gh-border rounded-md shadow-lg z-30 py-1 max-h-48 overflow-auto">
               <button type="button" v-for="u in UNITS" :key="u.value"
                 class="block w-full text-left px-3 py-1.5 text-xs hover:bg-gh-tag transition-colors active:bg-gh-border/60 active:scale-[0.98]"
                 :class="form.unit === u.value ? 'bg-gh-tag font-medium' : ''"
@@ -319,7 +319,7 @@ function barColor(bar) {
     <!-- edit modal -->
     <div v-if="showEdit" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4"
       @click.self="showEdit = false">
-      <div class="modal-pop bg-gh-bg border border-gh-border rounded-lg w-full max-w-md p-4 shadow-xl">
+      <div class="modal-pop panel-tech w-full max-w-md p-4">
         <h3 class="font-semibold text-base mb-3">编辑 API Key</h3>
         <label class="block text-xs text-gh-muted mb-1">修改有效期（留空 = 不变）</label>
         <div class="flex gap-2 mb-3">
@@ -331,7 +331,7 @@ function barColor(bar) {
               <i class="fa-solid fa-chevron-down text-[10px] text-gh-muted"></i>
             </button>
             <div v-if="unitOpen === 'edit'"
-              class="absolute right-0 top-full mt-1 w-full bg-white border border-gh-border rounded-md shadow-lg z-30 py-1 max-h-48 overflow-auto">
+              class="absolute right-0 top-full mt-1 w-full bg-gh-panel border border-gh-border rounded-md shadow-lg z-30 py-1 max-h-48 overflow-auto">
               <button type="button" v-for="u in UNITS" :key="u.value"
                 class="block w-full text-left px-3 py-1.5 text-xs hover:bg-gh-tag transition-colors active:bg-gh-border/60 active:scale-[0.98]"
                 :class="editForm.unit === u.value ? 'bg-gh-tag font-medium' : ''"
@@ -357,10 +357,10 @@ function barColor(bar) {
     <!-- plain key modal -->
     <div v-if="showPlain" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4"
       @click.self="showPlain = false">
-      <div class="modal-pop bg-gh-bg border border-gh-border rounded-lg w-full max-w-md p-4 shadow-xl">
+      <div class="modal-pop panel-tech w-full max-w-md p-4">
         <h3 class="font-semibold text-base mb-2">Key 已创建</h3>
         <p class="text-xs text-gh-muted mb-3">请复制保存。该 Key 已加密保存在服务器，之后可在列表点击"复制"再次查看明文。</p>
-        <div class="bg-gh-panel border border-gh-border rounded-md p-3 font-mono text-sm mb-3 break-all">
+        <div class="bg-[#0a111d] border border-gh-cyan/25 rounded-md p-3 font-mono text-sm mb-3 break-all text-gh-cyan">
           {{ plainKey }}
         </div>
         <div class="flex justify-end gap-1.5">
@@ -375,16 +375,21 @@ function barColor(bar) {
 <style scoped>
 .input {
   width: 100%;
-  padding: 4px 8px;
+  padding: 6px 10px;
   font-size: 12px;
   line-height: 20px;
-  background: #ffffff;
-  border: 1px solid #d0d7de;
+  background: #0a111d;
+  border: 1px solid var(--color-gh-border);
   border-radius: 6px;
-  color: #24292f;
+  color: var(--color-gh-text);
   outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.input::placeholder {
+  color: #4d5f78;
 }
 .input:focus {
-  border-color: #0969da;
+  border-color: #22d3ee;
+  box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.14);
 }
 </style>

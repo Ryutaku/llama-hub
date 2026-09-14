@@ -1,0 +1,189 @@
+#!/usr/bin/env bash
+set -u
+
+# llama-server 启动脚本（由 llama-hub 自动生成，请勿手工修改）
+# - 服务在独立会话中后台运行
+# - 当天日志写入 llama.log，换日后归档为 llama-YYYY-MM-DD.log
+# - flock 串行化“检查并启动”，防止双开
+
+readonly BASE="{{BASE}}"
+readonly LOG_DIR="$BASE/logs"
+readonly LOG_FILE="$LOG_DIR/llama.log"
+readonly PID_FILE="$LOG_DIR/llama.pid"
+readonly LOCK_FILE="$LOG_DIR/start.lock"
+readonly SERVER="{{SERVER}}"
+readonly MODEL="{{MODEL}}"
+readonly MMPROJ="{{MMPROJ}}"
+readonly PORT="{{PORT}}"
+readonly CUDA_DEVICE="${CUDA_VISIBLE_DEVICES:-{{CUDA_DEVICE}}}"
+
+mkdir -p "$LOG_DIR"
+
+message() {
+  printf '%s\n' "$*"
+}
+
+pid_alive() {
+  [[ "${1:-}" =~ ^[0-9]+$ ]] && kill -0 "$1" 2>/dev/null
+}
+
+is_our_server() {
+  local pid="${1:-}"
+  pid_alive "$pid" || return 1
+  tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null \
+    | grep -Fq -- "$SERVER"
+}
+
+read_server_pid() {
+  local pid
+  [ -s "$PID_FILE" ] || return 1
+  pid="$(tr -d '[:space:]' < "$PID_FILE")"
+  is_our_server "$pid" || return 1
+  printf '%s\n' "$pid"
+}
+
+port_in_use() {
+  ss -H -ltn "sport = :$PORT" 2>/dev/null | grep -q .
+}
+
+find_port_pid() {
+  ss -H -ltnp "sport = :$PORT" 2>/dev/null \
+    | awk 'match($0, /pid=([0-9]+)/, m) { print m[1]; exit }'
+}
+
+if [ ! -e "$SERVER" ]; then
+  message "缺少启动文件: $SERVER"
+  exit 1
+fi
+if [ -n "$MODEL" ] && [ ! -e "$MODEL" ]; then
+  message "缺少启动文件: $MODEL"
+  exit 1
+fi
+if [ -n "$MMPROJ" ] && [ ! -e "$MMPROJ" ]; then
+  message "缺少启动文件: $MMPROJ"
+  exit 1
+fi
+
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+  message "另一个启动任务正在执行，请稍后重试。"
+  exit 1
+fi
+
+pid="$(read_server_pid || true)"
+if [ -n "$pid" ]; then
+  flock -u 9
+  message "llama-server 已在运行 (pid $pid)，日志: $LOG_FILE"
+  exit 0
+fi
+
+if port_in_use; then
+  occupied_pid="$(find_port_pid || true)"
+  if is_our_server "$occupied_pid"; then
+    printf '%s\n' "$occupied_pid" > "$PID_FILE"
+    flock -u 9
+    message "llama-server 已在运行 (pid $occupied_pid)，日志: $LOG_FILE"
+    exit 0
+  fi
+  flock -u 9
+  message "端口 $PORT 已被其他进程占用${occupied_pid:+ (pid $occupied_pid)}，未启动 llama-server。"
+  exit 1
+fi
+
+rm -f "$PID_FILE"
+
+if [ -s "$LOG_FILE" ]; then
+  previous_day="$(date -r "$LOG_FILE" +%F)"
+  today="$(date +%F)"
+  if [ "$previous_day" != "$today" ]; then
+    archive="$LOG_DIR/llama-$previous_day.log"
+    if [ -e "$archive" ]; then
+      cat "$LOG_FILE" >> "$archive"
+      : > "$LOG_FILE"
+    else
+      mv "$LOG_FILE" "$archive"
+    fi
+  fi
+fi
+touch "$LOG_FILE"
+initial_log_day="$(date +%F)"
+
+export BASE LOG_DIR LOG_FILE PID_FILE SERVER MODEL MMPROJ PORT CUDA_DEVICE initial_log_day
+
+nohup setsid bash -c '
+  set -u
+  exec 9>&-
+  server_pid=""
+
+  cleanup() {
+    if [ -n "$server_pid" ] && [ -s "$PID_FILE" ]; then
+      current_pid="$(tr -d "[:space:]" < "$PID_FILE" 2>/dev/null || true)"
+      [ "$current_pid" = "$server_pid" ] && rm -f "$PID_FILE"
+    fi
+  }
+  trap cleanup EXIT
+
+  (
+    printf "llama-server starting: port=%s, cuda=%s, model=%s\n" "$PORT" "$CUDA_DEVICE" "$MODEL"
+    exec env CUDA_VISIBLE_DEVICES="$CUDA_DEVICE" \
+      numactl --cpunodebind=0 --membind=0 "$SERVER" \
+        {{ARGS}}
+  ) > >(
+    gawk -v log_dir="$LOG_DIR" -v log_file="$LOG_FILE" -v initial_day="$initial_log_day" '\''
+      BEGIN {
+        current_day = initial_day
+      }
+      {
+        now = systime()
+        day = strftime("%Y-%m-%d", now)
+        if (day != current_day) {
+          close(log_file)
+          archive = log_dir "/llama-" current_day ".log"
+          command = "if [ -s \"" log_file "\" ]; then " \
+                    "if [ -e \"" archive "\" ]; then " \
+                    "cat \"" log_file "\" >> \"" archive "\"; " \
+                    ": > \"" log_file "\"; else " \
+                    "mv \"" log_file "\" \"" archive "\"; " \
+                    "touch \"" log_file "\"; fi; fi"
+          system(command)
+          current_day = day
+        }
+        sub(/\r$/, "")
+        printf "%s %s\n", strftime("%Y-%m-%d %H:%M:%S", now), $0 >> log_file
+        fflush(log_file)
+      }
+    '\''
+  ) 2>&1 </dev/null &
+
+  server_pid=$!
+  tmp_pid="$PID_FILE.tmp.$BASHPID"
+  printf "%s\n" "$server_pid" > "$tmp_pid"
+  mv -f "$tmp_pid" "$PID_FILE"
+  wait "$server_pid"
+' >/dev/null 2>&1 </dev/null &
+
+launcher_pid=$!
+
+pid=""
+for _ in {1..300}; do
+  pid="$(read_server_pid || true)"
+  if [ -z "$pid" ] && port_in_use; then
+    fallback_pid="$(find_port_pid || true)"
+    if is_our_server "$fallback_pid"; then
+      pid="$fallback_pid"
+      printf '%s\n' "$pid" > "$PID_FILE"
+    fi
+  fi
+  [ -n "$pid" ] && break
+  pid_alive "$launcher_pid" || break
+  sleep 0.1
+done
+
+flock -u 9
+
+if [ -z "$pid" ]; then
+  message "llama-server 启动失败，请查看: $LOG_FILE"
+  exit 1
+fi
+
+message "llama-server 已后台启动 (pid $pid)，日志: $LOG_FILE"

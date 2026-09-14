@@ -1,23 +1,20 @@
 package com.llama.hub.controller;
 
+import com.github.pagehelper.PageHelper;
+import com.github.pagehelper.PageInfo;
+import com.llama.hub.mapper.AuditLogMapper;
+import com.llama.hub.mapper.CallLogMapper;
 import com.llama.hub.model.AuditLog;
 import com.llama.hub.model.CallLog;
-import com.llama.hub.repository.AuditLogRepository;
-import com.llama.hub.repository.CallLogRepository;
 import com.llama.hub.service.AuditService;
 import com.llama.hub.service.KeyService;
 import com.llama.hub.service.StatsService;
 import com.llama.hub.service.UpstreamHealthService;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Sort;
-import org.springframework.data.jpa.domain.Specification;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import jakarta.persistence.criteria.Predicate;
 import jakarta.servlet.http.HttpServletRequest;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -39,18 +36,18 @@ public class AdminController {
     private final StatsService statsService;
     private final UpstreamHealthService healthService;
     private final AuditService auditService;
-    private final CallLogRepository callLogRepository;
-    private final AuditLogRepository auditLogRepository;
+    private final CallLogMapper callLogMapper;
+    private final AuditLogMapper auditLogMapper;
 
     public AdminController(KeyService keyService, StatsService statsService,
                            UpstreamHealthService healthService, AuditService auditService,
-                           CallLogRepository callLogRepository, AuditLogRepository auditLogRepository) {
+                           CallLogMapper callLogMapper, AuditLogMapper auditLogMapper) {
         this.keyService = keyService;
         this.statsService = statsService;
         this.healthService = healthService;
         this.auditService = auditService;
-        this.callLogRepository = callLogRepository;
-        this.auditLogRepository = auditLogRepository;
+        this.callLogMapper = callLogMapper;
+        this.auditLogMapper = auditLogMapper;
     }
 
     // ---------- dashboard ----------
@@ -154,14 +151,16 @@ public class AdminController {
                                     @RequestParam(required = false) String endAt,
                                     @RequestParam(defaultValue = "1") int page,
                                     @RequestParam(defaultValue = "50") int size) {
-        Page<CallLog> result = callLogRepository.findAll(buildLogSpec(keyId, startAt, endAt),
-                PageRequest.of(Math.max(0, page - 1), Math.min(100, Math.max(1, size)),
-                        Sort.by(Sort.Direction.DESC, "startedAt")));
+        int pageNum = Math.max(1, page);
+        int pageSize = Math.min(100, Math.max(1, size));
+        PageHelper.startPage(pageNum, pageSize);
+        List<CallLog> rows = callLogMapper.selectList(keyId, parseStart(startAt), parseEnd(endAt));
+        PageInfo<CallLog> result = new PageInfo<>(rows);
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("content", result.getContent());
-        m.put("total", result.getTotalElements());
+        m.put("content", rows);
+        m.put("total", result.getTotal());
         m.put("page", page);
-        m.put("size", result.getSize());
+        m.put("size", pageSize);
         return m;
     }
 
@@ -169,13 +168,11 @@ public class AdminController {
     public ResponseEntity<byte[]> exportLogs(@RequestParam(required = false) Long keyId,
                                              @RequestParam(required = false) String startAt,
                                              @RequestParam(required = false) String endAt) {
-        Specification<CallLog> spec = buildLogSpec(keyId, startAt, endAt);
-        long count = callLogRepository.count(spec);
+        long count = callLogMapper.count(keyId, parseStart(startAt), parseEnd(endAt));
         if (count > EXPORT_LIMIT) {
             return ResponseEntity.badRequest().body(utf8Bom("记录超过 " + EXPORT_LIMIT + " 条，请缩小筛选范围"));
         }
-        List<CallLog> logs = callLogRepository.findAll(spec,
-                Sort.by(Sort.Direction.DESC, "startedAt"));
+        List<CallLog> logs = callLogMapper.selectList(keyId, parseStart(startAt), parseEnd(endAt));
 
         StringBuilder sb = new StringBuilder();
         sb.append("时间,Key名称,端点,模型,输入tokens,输出tokens,总tokens,缓存tokens,缓存命中率,生成速度(tokens/s),耗时(ms),状态码,错误信息\n");
@@ -212,54 +209,20 @@ public class AdminController {
                                          @RequestParam(required = false) String action,
                                          @RequestParam(required = false) String startAt,
                                          @RequestParam(required = false) String endAt) {
-        Specification<AuditLog> spec = (root, query, cb) -> {
-            List<Predicate> ps = new ArrayList<>();
-            if (username != null && !username.isEmpty()) {
-                ps.add(cb.equal(root.get("username"), username));
-            }
-            if (action != null && !action.isEmpty()) {
-                ps.add(cb.equal(root.get("action"), action));
-            }
-            LocalDateTime start = parseStart(startAt);
-            LocalDateTime end = parseEnd(endAt);
-            if (start != null) {
-                ps.add(cb.greaterThanOrEqualTo(root.get("createdAt"), start));
-            }
-            if (end != null) {
-                ps.add(cb.lessThan(root.get("createdAt"), end));
-            }
-            return cb.and(ps.toArray(new Predicate[0]));
-        };
-        Page<AuditLog> result = auditLogRepository.findAll(spec,
-                PageRequest.of(Math.max(0, page - 1), Math.min(100, Math.max(1, size)),
-                        Sort.by(Sort.Direction.DESC, "createdAt")));
+        int pageNum = Math.max(1, page);
+        int pageSize = Math.min(100, Math.max(1, size));
+        PageHelper.startPage(pageNum, pageSize);
+        List<AuditLog> rows = auditLogMapper.selectList(username, action, parseStart(startAt), parseEnd(endAt));
+        PageInfo<AuditLog> result = new PageInfo<>(rows);
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("content", result.getContent());
-        m.put("total", result.getTotalElements());
+        m.put("content", rows);
+        m.put("total", result.getTotal());
         m.put("page", page);
-        m.put("size", result.getSize());
+        m.put("size", pageSize);
         return m;
     }
 
     // ---------- helpers ----------
-
-    private Specification<CallLog> buildLogSpec(Long keyId, String startAt, String endAt) {
-        return (root, query, cb) -> {
-            List<Predicate> ps = new ArrayList<>();
-            if (keyId != null && keyId > 0) {
-                ps.add(cb.equal(root.get("keyId"), keyId));
-            }
-            LocalDateTime start = parseStart(startAt);
-            LocalDateTime end = parseEnd(endAt);
-            if (start != null) {
-                ps.add(cb.greaterThanOrEqualTo(root.get("startedAt"), start));
-            }
-            if (end != null) {
-                ps.add(cb.lessThan(root.get("startedAt"), end));
-            }
-            return cb.and(ps.toArray(new Predicate[0]));
-        };
-    }
 
     /** 开始时间：兼容 "yyyy-MM-dd"（当日 00:00）与 ISO datetime */
     private LocalDateTime parseStart(String s) {

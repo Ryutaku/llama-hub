@@ -13,10 +13,6 @@ spring:
     driver-class-name: org.h2.Driver
     username: sa
     password: ""
-  jpa:
-    hibernate:
-      ddl-auto: update
-    open-in-view: false
   jackson:
     time-zone: Asia/Shanghai
   mvc:
@@ -25,6 +21,20 @@ spring:
 
 gateway:
   upstream: http://192.168.2.185:18082
+  model:
+    ssh-host: 192.168.2.185
+    ssh-port: 22
+    ssh-user: root
+    ssh-timeout-seconds: 15
+    api-port: 18082
+    base-dir: /home/llama-cpp
+    server-binary: /home/llama-cpp/llama.cpp/build-cuda/bin/llama-server
+    model-path: /home/hf/ukisai/Swift-Qwen3.8-27B-GGUF/Swift-Qwen3.8-27B-Q4_K_M.gguf
+    mmproj-path: /home/hf/ukisai/Swift-Qwen3.8-27B-GGUF/mmproj-Swift-Qwen3.8-27B-F16.gguf
+    probe-interval-ms: 5000
+    start-timeout-seconds: 300
+    stop-timeout-seconds: 180
+    log-tail-lines: 500
   key:
     encryption-key: llm-gateway-default   # 密钥明文副本的 AES 加密密钥，建议通过环境变量覆盖
   log:

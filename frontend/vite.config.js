@@ -11,7 +11,7 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/llama-hub': {
+      '/llama-hub/api': {
         target: 'http://127.0.0.1:18443',
         changeOrigin: true,
         rewrite: (p) => p.replace(/^\/llama-hub/, '')

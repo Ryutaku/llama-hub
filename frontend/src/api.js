@@ -2,6 +2,8 @@ let onUnauthorized = null
 
 const BASE = '/llama-hub'
 
+export const apiBase = BASE
+
 export function setUnauthorizedHandler(fn) {
   onUnauthorized = fn
 }
@@ -96,5 +98,13 @@ export const api = {
   revealKey: (id) => request(`/api/admin/keys/${id}/reveal`, { method: 'POST' }),
   logs: (params) => request(`/api/admin/logs?${qs(params)}`),
   exportLogs: (params) => downloadCsv(`/api/admin/logs/export?${qs(params)}`),
-  auditLogs: (params) => request(`/api/admin/audit-logs?${qs(params)}`)
+  auditLogs: (params) => request(`/api/admin/audit-logs?${qs(params)}`),
+  modelStatus: () => request('/api/admin/model/status'),
+  modelStart: () => request('/api/admin/model/start', { method: 'POST' }),
+  modelStop: () => request('/api/admin/model/stop', { method: 'POST' }),
+  modelConfig: () => request('/api/admin/model/config'),
+  modelConfigSave: (args) => request('/api/admin/model/config', { method: 'PUT', body: JSON.stringify({ args }) }),
+  modelSnapshot: () => request('/api/admin/model/config/snapshot', { method: 'POST' }),
+  modelLogsUrl: () => apiBase + '/api/admin/model/logs',
+  modelEventsUrl: () => apiBase + '/api/admin/model/events'
 }

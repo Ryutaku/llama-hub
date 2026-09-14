@@ -2,8 +2,8 @@ package com.llama.hub.service;
 
 import com.llama.hub.model.ApiKey;
 import com.llama.hub.model.CallLog;
-import com.llama.hub.repository.ApiKeyRepository;
-import com.llama.hub.repository.CallLogRepository;
+import com.llama.hub.mapper.ApiKeyMapper;
+import com.llama.hub.mapper.CallLogMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
@@ -47,8 +47,8 @@ public class ProxyService {
 
     private final WebClient webClient;
     private final ObjectMapper objectMapper;
-    private final ApiKeyRepository apiKeyRepository;
-    private final CallLogRepository callLogRepository;
+    private final ApiKeyMapper apiKeyMapper;
+    private final CallLogMapper callLogMapper;
 
     @Value("${gateway.upstream:http://127.0.0.1:18082}")
     private String upstream;
@@ -57,11 +57,11 @@ public class ProxyService {
     private boolean bodyEnabled;
 
     public ProxyService(WebClient.Builder webClientBuilder, ObjectMapper objectMapper,
-                        ApiKeyRepository apiKeyRepository, CallLogRepository callLogRepository) {
+                        ApiKeyMapper apiKeyMapper, CallLogMapper callLogMapper) {
         this.webClient = webClientBuilder.build();
         this.objectMapper = objectMapper;
-        this.apiKeyRepository = apiKeyRepository;
-        this.callLogRepository = callLogRepository;
+        this.apiKeyMapper = apiKeyMapper;
+        this.callLogMapper = callLogMapper;
     }
 
     public CompletableFuture<Void> proxy(HttpServletRequest req, HttpServletResponse resp) {
@@ -256,7 +256,7 @@ public class ProxyService {
                             .setScale(2, RoundingMode.HALF_UP));
                 }
             }
-            callLogRepository.save(callLog);
+            callLogMapper.insert(callLog);
 
             apiKey.setHitCount(apiKey.getHitCount() + 1);
             apiKey.setLastUsedAt(now);
@@ -264,7 +264,7 @@ public class ProxyService {
             if (usage != null && usage.total != null && usage.total > 0) {
                 apiKey.setTokensUsed(apiKey.getTokensUsed() + usage.total);
             }
-            apiKeyRepository.save(apiKey);
+            apiKeyMapper.update(apiKey);
         } catch (Exception e) {
             log.error("Failed to record call log for request {}", requestId, e);
         }

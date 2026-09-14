@@ -33,16 +33,29 @@
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-data-jpa</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+        <!-- MyBatis（参照 token-dashboard 3.0.3；3.0.5 为 Spring Boot 4 兼容版本） -->
+        <dependency>
+            <groupId>org.mybatis.spring.boot</groupId>
+            <artifactId>mybatis-spring-boot-starter</artifactId>
+            <version>3.0.5</version>
+        </dependency>
+        <!-- PageHelper 分页 -->
+        <dependency>
+            <groupId>com.github.pagehelper</groupId>
+            <artifactId>pagehelper-spring-boot-starter</artifactId>
+            <version>2.1.0</version>
         </dependency>
         <dependency>
             <groupId>com.h2database</groupId>
             <artifactId>h2</artifactId>
             <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.hierynomus</groupId>
+            <artifactId>sshj</artifactId>
+            <version>0.38.0</version>
         </dependency>
         <dependency>
             <groupId>org.springframework.security</groupId>
@@ -81,6 +94,7 @@
                     <excludes>
                         <exclude>static/**</exclude>
                         <exclude>templates/**</exclude>
+                        <exclude>mybatis/**</exclude>
                         <exclude>*.properties</exclude>
                         <exclude>*.yml</exclude>
                         <exclude>*.yaml</exclude>

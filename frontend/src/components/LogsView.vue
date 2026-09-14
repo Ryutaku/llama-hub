@@ -17,7 +17,7 @@ const keys = ref([])
 const logs = ref([])
 const total = ref(0)
 const page = ref(1)
-const size = ref(50)
+const size = ref(20)
 const loading = ref(false)
 const error = ref('')
 const expanded = ref(null)
@@ -132,15 +132,15 @@ function toggle(row) {
       <AppButton
         variant="primary-green"
         :loading="loading" @click="search"
-      ><i v-if="!loading" class="fa-solid fa-magnifying-glass mr-1"></i>查询</AppButton>
+      ><i v-if="!loading" class="fa-solid fa-search mr-1"></i>查询</AppButton>
     </div>
 
     <p v-if="error" class="text-gh-red text-sm mb-3">{{ error }}</p>
 
-    <div class="bg-gh-panel border border-gh-border rounded-lg overflow-hidden">
+    <div class="panel-tech overflow-hidden">
       <table class="w-full text-sm">
         <thead>
-          <tr class="border-b border-gh-border text-left text-xs text-gh-muted">
+          <tr class="border-b border-gh-border bg-gh-tag/60 text-left text-xs text-gh-muted">
             <th class="px-3 py-2">时间</th>
             <th class="px-3 py-2">Key</th>
             <th class="px-3 py-2">端点</th>
@@ -159,7 +159,7 @@ function toggle(row) {
             <td colspan="11" class="px-4 py-10 text-center text-gh-muted">暂无日志</td>
           </tr>
           <template v-for="l in logs" :key="l.id">
-            <tr class="border-b border-gh-border/50 hover:bg-gh-tag/40 active:bg-gh-tag cursor-pointer transition-colors" @click="toggle(l)">
+            <tr class="border-b border-gh-border/40 hover:bg-gh-cyan/5 active:bg-gh-cyan/10 cursor-pointer transition-colors" @click="toggle(l)">
               <td class="px-3 py-1.5 text-xs text-gh-muted font-mono whitespace-nowrap">{{ fmtTime(l.startedAt) }}</td>
               <td class="px-3 py-1.5 text-xs">{{ l.keyName }}</td>
               <td class="px-3 py-1.5 text-xs font-mono text-gh-muted">{{ l.endpoint }}</td>
@@ -174,17 +174,17 @@ function toggle(row) {
                 {{ l.statusCode ?? '—' }}
               </td>
             </tr>
-            <tr v-if="expanded === l.id" class="border-b border-gh-border bg-gh-tag/30">
+            <tr v-if="expanded === l.id" class="border-b border-gh-border bg-gh-cyan/[0.04]">
               <td colspan="11" class="px-3 py-3">
                 <div class="text-xs text-gh-muted mb-1">模型：<span class="text-gh-text font-mono">{{ l.model || '—' }}</span></div>
                 <div v-if="l.errorMsg" class="text-xs mb-2">错误信息：<span class="text-gh-red font-mono break-all">{{ l.errorMsg }}</span></div>
                 <div v-if="l.requestBody" class="mb-2">
                   <div class="text-xs text-gh-muted mb-1">请求体</div>
-                  <pre class="text-xs bg-gh-bg border border-gh-border rounded-md p-2.5 overflow-x-auto max-h-56 font-mono">{{ l.requestBody }}</pre>
+                  <pre class="text-xs bg-[#0a111d] border border-gh-border rounded-md p-2.5 overflow-x-auto max-h-56 font-mono">{{ l.requestBody }}</pre>
                 </div>
                 <div v-if="l.responseBody">
                   <div class="text-xs text-gh-muted mb-1">响应体</div>
-                  <pre class="text-xs bg-gh-bg border border-gh-border rounded-md p-2.5 overflow-x-auto max-h-56 font-mono">{{ l.responseBody }}</pre>
+                  <pre class="text-xs bg-[#0a111d] border border-gh-border rounded-md p-2.5 overflow-x-auto max-h-56 font-mono">{{ l.responseBody }}</pre>
                 </div>
                 <div v-if="!l.requestBody && !l.responseBody && !l.errorMsg" class="text-xs text-gh-muted">
                   未记录请求体/响应体（可在 application.yml 开启 gateway.log.body-enabled）
@@ -202,16 +202,18 @@ function toggle(row) {
 
 <style scoped>
 .input {
-  padding: 4px 8px;
+  height: 30px;
+  padding: 0 8px;
   font-size: 12px;
-  line-height: 20px;
-  background: #ffffff;
-  border: 1px solid #d0d7de;
+  background: #0a111d;
+  border: 1px solid var(--color-gh-border);
   border-radius: 6px;
-  color: #24292f;
+  color: var(--color-gh-text);
   outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .input:focus {
-  border-color: #0969da;
+  border-color: #22d3ee;
+  box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.14);
 }
 </style>

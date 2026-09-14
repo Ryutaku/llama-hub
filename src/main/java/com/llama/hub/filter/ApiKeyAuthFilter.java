@@ -1,7 +1,7 @@
 package com.llama.hub.filter;
 
 import com.llama.hub.model.ApiKey;
-import com.llama.hub.repository.ApiKeyRepository;
+import com.llama.hub.mapper.ApiKeyMapper;
 import com.llama.hub.util.ApiKeyUtil;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -16,10 +16,10 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
 
     public static final String ATTR_API_KEY = "gw_api_key";
 
-    private final ApiKeyRepository apiKeyRepository;
+    private final ApiKeyMapper apiKeyMapper;
 
-    public ApiKeyAuthFilter(ApiKeyRepository apiKeyRepository) {
-        this.apiKeyRepository = apiKeyRepository;
+    public ApiKeyAuthFilter(ApiKeyMapper apiKeyMapper) {
+        this.apiKeyMapper = apiKeyMapper;
     }
 
     @Override
@@ -35,7 +35,7 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
             writeJsonError(response, 401, "missing api key", "invalid_request_error");
             return;
         }
-        ApiKey key = apiKeyRepository.findByKeyHash(ApiKeyUtil.sha256Hex(plain));
+        ApiKey key = apiKeyMapper.findByKeyHash(ApiKeyUtil.sha256Hex(plain));
         if (key == null) {
             writeJsonError(response, 401, "invalid api key", "invalid_request_error");
             return;

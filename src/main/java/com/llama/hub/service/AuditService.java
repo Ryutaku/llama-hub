@@ -1,7 +1,7 @@
 package com.llama.hub.service;
 
+import com.llama.hub.mapper.AuditLogMapper;
 import com.llama.hub.model.AuditLog;
-import com.llama.hub.repository.AuditLogRepository;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -9,10 +9,10 @@ import java.time.LocalDateTime;
 @Service
 public class AuditService {
 
-    private final AuditLogRepository auditLogRepository;
+    private final AuditLogMapper auditLogMapper;
 
-    public AuditService(AuditLogRepository auditLogRepository) {
-        this.auditLogRepository = auditLogRepository;
+    public AuditService(AuditLogMapper auditLogMapper) {
+        this.auditLogMapper = auditLogMapper;
     }
 
     public void record(String username, String action, String target, String detail, String ip) {
@@ -23,7 +23,7 @@ public class AuditService {
         log.setDetail(truncate(detail, 500));
         log.setIp(truncate(ip, 45));
         log.setCreatedAt(LocalDateTime.now());
-        auditLogRepository.save(log);
+        auditLogMapper.insert(log);
     }
 
     private String truncate(String s, int max) {

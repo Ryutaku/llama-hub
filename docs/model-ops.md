@@ -17,7 +17,7 @@ llama-hub 已实现 API Key 网关（认证/限额/调用日志/仪表盘），�
 ```
  浏览器(管理页)                          业务客户端
    │ /api/admin/model/**                   │ /v1/* (API Key)
-   ▼                                       ▼
+ ▼                                       ▼
 ┌────────────────────────────────────────────────────────┐
 │ llama-hub :18443                                   │
 │                                                        │
@@ -26,7 +26,7 @@ llama-hub 已实现 API Key 网关（认证/限额/调用日志/仪表盘），�
 │  ModelStatusService(状态机, 原上游探活升级) ◄┘           │
 │  SshService(sshj 常驻会话, 独立线程池) ──┘              │
 │  鉴权: AdminSessionFilter + IpWhitelistFilter (复用)    │
-└──────────────────────┬─────────────────────────────────┘
+└──────────────────────────────────┬─────────────────────┘
                        │ 数据面: HTTP 直连 18082 (内网)
                        │ 运维面: SSH 免密 :22
                        ▼
@@ -42,7 +42,7 @@ llama-hub 已实现 API Key 网关（认证/限额/调用日志/仪表盘），�
   - 状态变化发事件（SSE 广播给运维页）
   - 网关侧 `ProxyService` 的 503 判断改读此状态（原内存健康缓存的替代）
 - `ModelOpsService`：start / stop / snapshot 编排（见「启停序列」「快照」）
-- `ModelConfigService`：`model_config` 表读写 + 参数白名单校验 + diff 计算
+- `ModelConfigService`：`model_config` 表读写 + 完整参数行词法校验 + flag 级 diff + 从参数行解析 `--port/-m/-mm`（供探测与脚本模板）
 - `ModelLogStreamService`：SSE 日志订阅管理，每个订阅一个 sshj `ChannelExec`（`tail -n 500 -F llama.log`），客户端断开必须关 channel
 - `ModelOpsController`：`/api/admin/model/**`（复用现有管理端鉴权，不新开通道）
 - `model/ModelConfig.java` + `repository/ModelConfigRepository.java`
@@ -56,9 +56,9 @@ llama-hub 已实现 API Key 网关（认证/限额/调用日志/仪表盘），�
 | GET | `/api/admin/model/status` | 状态快照（state/pid/uptime/healthOk/portListening） |
 | POST | `/api/admin/model/start` | 启动（异步），202 + STARTING |
 | POST | `/api/admin/model/stop` | 停止（异步），202 + STOPPING |
-| GET | `/api/admin/model/config` | 当前参数配置 + source 标记 |
-| PUT | `/api/admin/model/config` | 保存参数（白名单校验，返回 diff，重启生效） |
-| POST | `/api/admin/model/config/snapshot` | 从运行进程 cmdline 快照参数（返回 diff，确认后落库） |
+| GET | `/api/admin/model/config` | 当前完整参数行 + 来源 + 运行参数行（drift 标记） |
+| PUT | `/api/admin/model/config` | 保存完整参数行（词法校验，返回 diff，重启生效） |
+| POST | `/api/admin/model/config/snapshot` | 从运行进程 cmdline 快照完整参数行（返回 diff，确认后落库） |
 | GET | `/api/admin/model/logs` | SSE：llama.log 实时流（event: log） |
 | GET | `/api/admin/model/events` | SSE：状态机变化事件 |
 
@@ -84,7 +84,7 @@ SSH 执行 `bash /home/llama-cpp/stop.sh`（现有脚本：SIGTERM → 30s → S
 
 ### 启动
 
-1. 读 `model_config`，生成完整启动脚本（模板 = 现有 start.sh 结构：flock 锁、pid 文件读写、端口占用检测、跨天日志归档、`numactl --cpunodebind=0 --membind=0`、`CUDA_VISIBLE_DEVICES` 注入、gawk 时间戳日志处理；仅参数段替换）
+1. 读 `model_config` 的完整参数行，生成完整启动脚本（模板 = 现有 start.sh 结构：flock 锁、pid 文件读写、端口占用检测、跨天日志归档、`numactl --cpunodebind=0 --membind=0`、`CUDA_VISIBLE_DEVICES` 注入、gawk 时间戳日志处理；exec 的参数部分整段由参数行原样渲染，模板不再注入任何 flag）
 2. SSH 原子写入 `/home/llama-cpp/start-gateway.sh`（tmp + mv）+ `chmod +x`
 3. SSH 执行 `bash /home/llama-cpp/start-gateway.sh`，置 STARTING
 4. 脚本内 PID 文件与现有机制兼容，stop.sh / 手工 start.sh 均可继续管理同一进程
@@ -93,38 +93,33 @@ SSH 执行 `bash /home/llama-cpp/stop.sh`（现有脚本：SIGTERM → 30s → S
 
 ### 存储
 
+参数直接以「llama-server 完整参数行」形式存储（命令行中二进制路径之后的全部参数，含 `-m/-mm/--host/--port` 等，任意参数可自由增删改）。UI 以代码块形式直接编辑（默认每行一个参数），启动脚本原样渲染进 start-gateway.sh——比结构化表单灵活：
+
 ```sql
 CREATE TABLE model_config (
     id          BIGINT AUTO_INCREMENT PRIMARY KEY,
-    config_json TEXT NOT NULL,          -- params 整体 JSON
+    config_json TEXT NOT NULL,          -- {"args": "<完整参数行>"}
     source      VARCHAR(20) NOT NULL,   -- default / snapshot / edited
     updated_at  TIMESTAMP
 );
 ```
 
-单行记录；`source` 标记当前参数来源，UI 展示「来源：服务器快照 2026-09-14」。
+单行记录；`source` 标记当前参数来源，UI 展示「来源：服务器快照 2026-09-14」。旧版 params JSON 首次读取时惰性迁移为完整参数行（补 `-m/-mm` 与 `--host/--port/--no-log-timestamps`）。
 
-### 参数字段（基线 = 2026-09-14 实际运行进程）
+### 基线参数行（= 2026-09-14 实际运行进程完整参数）
 
-```json
-{
-  "port": 18082, "alias": "qwen3", "ngl": 99,
-  "tensorSplit": "36,30", "sm": "layer",
-  "ctx": 400000, "ctk": "q8_0", "ctv": "q8_0", "np": 2, "noKvUnified": true,
-  "specType": "draft-mtp", "specDraftNMax": 6, "specDraftPMin": 0.3, "specDraftPSplit": 0.1,
-  "flashAttention": "on", "threads": 64, "threadsBatch": 64,
-  "batchSize": 2048, "ubatchSize": 1024, "cram": 65536, "imageMinTokens": 1024,
-  "reasoning": "auto", "reasoningPreserve": true, "jinja": true, "cudaDevice": "0"
-}
+```
+-m <model> -mm <mmproj> --chat-template-file <path> -a qwen3 -ngl 99 -ts 36,30 -sm layer -c 400000 -ctk q8_0 -ctv q8_0 -np 2 --no-kv-unified --spec-type draft-mtp --spec-draft-n-max 6 --spec-draft-p-min 0.3 --spec-draft-p-split 0.1 -fa on -t 64 -tb 64 --batch-size 2048 --ubatch-size 1024 -cram 65536 --image-min-tokens 1024 --reasoning auto --reasoning-preserve --jinja --host 0.0.0.0 --port 18082 --no-log-timestamps
 ```
 
-非参数常量（二进制路径、模型路径、mmproj、chat template、185 连接信息）放 `application.yml` 的 `gateway.model.*` 段，不进表单。
+非参数常量（二进制路径、185 连接信息、CUDA 卡号）放 `application.yml` 的 `gateway.model.*` 段；模型路径/mmproj/chat template 属于参数行本身（基线从 yml 生成）。参数行保存前做词法校验：只允许 `-flag [value]` 结构（flag 形如 `-[a-z]+` / `--kebab-case`，value 限 `[A-Za-z0-9._,+-/]`，含路径斜杠），防脚本注入。
 
 ### 修改与快照流程
 
-- 修改：表单 → PUT（白名单校验）→ 落库 → UI 明示「已保存，重启后生效」→ 点启动时按新参数生成脚本
-- 快照：SSH 读 PID（llama.pid + 端口检测兜底）→ 解析 `/proc/<pid>/cmdline` → 按白名单字段映射回 params → 与库中 diff → 前端展示 diff 确认后覆盖落库（source=snapshot）
-- 一致性提示：状态卡比较运行 cmdline 与库内 params 关键字段，不一致时显示「运行参数与配置不一致」徽标，引导用快照
+- 修改：代码块编辑完整参数行（默认每行一个参数）→ PUT（词法校验）→ 落库 → UI 明示「已保存，重启后生效」→ 点启动时把参数行原样渲染进脚本
+- 快照：取运行进程 `/proc/<pid>/cmdline` → 去掉二进制路径得到完整参数行 → 与库内参数行做 flag 级 diff → 前端展示 diff，覆盖落库（source=snapshot）
+- 一致性提示：config API 返回 `runningArgs` 与 `drift`（运行参数行与库内参数行 token 级比较），不一致时显示「运行参数与配置不一致」徽标，引导用快照
+- 探测跟随：状态探测（端口检查 + `/health`）与启动脚本的端口/文件检查从参数行解析 `--port` / `-m` / `-mm`，缺失时回退 `gateway.model.*` 配置
 
 ## 日志流
 
@@ -138,7 +133,7 @@ CREATE TABLE model_config (
 
 - 状态卡：state 徽标（配色区分 RUNNING/STARTING/STOPPED/ERROR/UNKNOWN）、PID、uptime、health、端口、「配置不一致」徽标
 - 操作区：启动/停止按钮（按状态启用/禁用、防抖），STARTING 时展示「模型加载中」+ 日志尾部
-- 参数区：表单按分组（连接 / GPU / 上下文 / 批处理 / 投机解码 / 其他），保存 + 「从服务器快照」（diff 确认弹窗）
+- 参数区：代码块直接编辑完整参数行（默认每行一个参数；来源徽标 + 更新时间 + 「运行参数与配置不一致」徽标 + 当前运行参数对照），保存 + 「从服务器快照」（flag 级 diff 弹窗）；参数区与日志区 Tab 切换
 - 日志区：终端样式 SSE 流，自动滚动 + 过滤
 - 顶栏上游指示灯改绑 `ModelStatusService`（语义不变：绿/红）
 
@@ -152,6 +147,7 @@ CREATE TABLE model_config (
 
 - SSH 库选 sshj：纯 Java、维护活跃；JSch original 停更
 - 参数存 H2 `model_config` 而非 JSON 文件：与项目现有持久化风格一致（JPA），免额外文件管理
+- 参数以完整参数行存储而非结构化表单：直接对应命令行（含 `-m/-mm/--host/--port`），任意参数可自由增删改，快照/一致性比较即参数行 token 比较，无结构映射漂移；探测与脚本模板的端口/路径从参数行解析
 - 启动脚本整体生成推送到 185：脚本在服务器上可见可审计、可手工执行，与现有运维习惯一致；比拼内联长命令可靠
 - 不引入 WebSocket：SSE 已满足单向推送，且 nginx 侧已有 `proxy_buffering off` 配置可复用
 
@@ -160,10 +156,11 @@ CREATE TABLE model_config (
 - 双入口漂移：人仍可 SSH 手工改脚本/启停 → 一致性徽标 + 快照按钮兜底
 - SSH 断连：状态 UNKNOWN，禁止启停动作；恢复后自动回到真实状态
 - 加载超时：5 分钟上限，不自动重试
+- 参数行误编辑：词法校验拦截非法 token 与危险 value（防脚本注入）；diff 展示变更，重启前可回滚。注意 `--port`/`-m` 改动会直接影响状态探测与启动文件检查
 - 一期不做：多后端、185 资源监控（GPU/磁盘）、模型文件管理（下载/切换权重）、按参数预设多套 profile
 
 ## 实施阶段
 
 - 阶段一：`SshService` + `ModelStatusService`（状态机）+ 状态 API + 前端状态卡
 - 阶段二：启停（脚本生成 + 异步状态）+ 日志 SSE + 前端操作区/日志区
-- 阶段三：参数表单 + 快照 diff + 一致性提示 + 审计动作
+- 阶段三：完整参数行代码块编辑 + 快照 diff + 一致性提示 + 审计动作

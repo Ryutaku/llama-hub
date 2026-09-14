@@ -1,7 +1,7 @@
 package com.llama.hub.service;
 
+import com.llama.hub.mapper.AdminUserMapper;
 import com.llama.hub.model.AdminUser;
-import com.llama.hub.repository.AdminUserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -22,27 +22,27 @@ public class AdminUserService implements ApplicationRunner {
     private static final long LOCK_MINUTES = 5;
     private static final int MIN_PASSWORD_LEN = 8;
 
-    private final AdminUserRepository adminUserRepository;
+    private final AdminUserMapper adminUserMapper;
     private final BCryptPasswordEncoder passwordEncoder;
     private final Map<String, LoginAttempt> attempts = new ConcurrentHashMap<>();
 
     @Value("${GATEWAY_ADMIN_INITIAL_PASSWORD:admin123}")
     private String initialPassword;
 
-    public AdminUserService(AdminUserRepository adminUserRepository, BCryptPasswordEncoder passwordEncoder) {
-        this.adminUserRepository = adminUserRepository;
+    public AdminUserService(AdminUserMapper adminUserMapper, BCryptPasswordEncoder passwordEncoder) {
+        this.adminUserMapper = adminUserMapper;
         this.passwordEncoder = passwordEncoder;
     }
 
     @Override
     public void run(ApplicationArguments args) {
-        if (adminUserRepository.count() == 0) {
+        if (adminUserMapper.count() == 0) {
             AdminUser admin = new AdminUser();
             admin.setUsername("admin");
             admin.setPasswordHash(passwordEncoder.encode(initialPassword));
             admin.setCreatedAt(LocalDateTime.now());
             admin.setUpdatedAt(LocalDateTime.now());
-            adminUserRepository.save(admin);
+            adminUserMapper.insert(admin);
             log.info("Initial admin user created (username: admin), change the password after first login.");
         }
     }
@@ -58,7 +58,7 @@ public class AdminUserService implements ApplicationRunner {
             if (attempt.fails >= MAX_FAILS && (now - attempt.lockedAt) < LOCK_MINUTES * 60_000L) {
                 return "LOCKED";
             }
-            AdminUser user = adminUserRepository.findByUsername(username);
+            AdminUser user = adminUserMapper.findByUsername(username);
             if (user != null && passwordEncoder.matches(password, user.getPasswordHash())) {
                 attempts.remove(username);
                 return "OK";
@@ -81,7 +81,7 @@ public class AdminUserService implements ApplicationRunner {
     }
 
     public AdminUser findByUsername(String username) {
-        return adminUserRepository.findByUsername(username);
+        return adminUserMapper.findByUsername(username);
     }
 
     /** 修改密码。返回 null 表示成功，否则返回错误原因。 */
@@ -92,7 +92,7 @@ public class AdminUserService implements ApplicationRunner {
         if (newPassword.equals(oldPassword)) {
             return "新密码不能与旧密码相同";
         }
-        AdminUser user = adminUserRepository.findByUsername(username);
+        AdminUser user = adminUserMapper.findByUsername(username);
         if (user == null) {
             return "用户不存在";
         }
@@ -104,7 +104,7 @@ public class AdminUserService implements ApplicationRunner {
         }
         user.setPasswordHash(passwordEncoder.encode(newPassword));
         user.setUpdatedAt(LocalDateTime.now());
-        adminUserRepository.save(user);
+        adminUserMapper.update(user);
         String hash = user.getPasswordHash();
         log.info("Password changed for user {}", username);
         return null;

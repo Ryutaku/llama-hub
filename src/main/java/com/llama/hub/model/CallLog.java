@@ -1,69 +1,44 @@
 package com.llama.hub.model;
 
-import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
-@Entity
-@Table(name = "call_log", indexes = {
-        @Index(name = "idx_call_log_key_id", columnList = "key_id,started_at"),
-        @Index(name = "idx_call_log_time", columnList = "started_at")
-})
 public class CallLog {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "key_id", nullable = false)
     private Long keyId;
 
-    @Column(name = "key_name", length = 100)
     private String keyName;
 
-    @Column(name = "request_id", nullable = false, length = 64)
     private String requestId;
 
-    @Column(length = 200)
     private String endpoint;
 
-    @Column(length = 100)
     private String model;
 
-    @Column(name = "prompt_tokens")
     private Integer promptTokens;
 
-    @Column(name = "completion_tokens")
     private Integer completionTokens;
 
-    @Column(name = "total_tokens")
     private Integer totalTokens;
 
-    @Column(name = "cached_tokens")
     private Integer cachedTokens;
 
-    @Column(name = "cache_hit_rate", precision = 5, scale = 4)
     private BigDecimal cacheHitRate;
 
-    @Column(name = "tokens_per_sec", precision = 8, scale = 2)
     private BigDecimal tokensPerSec;
 
-    @Column(name = "started_at", nullable = false)
     private LocalDateTime startedAt;
 
-    @Column(name = "duration_ms")
     private Long durationMs;
 
-    @Column(name = "status_code")
     private Integer statusCode;
 
-    @Column(name = "error_msg", length = 500)
     private String errorMsg;
 
-    @Column(name = "request_body", columnDefinition = "TEXT")
     private String requestBody;
 
-    @Column(name = "response_body", columnDefinition = "TEXT")
     private String responseBody;
 
     public Long getId() { return id; }

@@ -1,34 +1,21 @@
 package com.llama.hub.model;
 
-import jakarta.persistence.*;
 import java.time.LocalDateTime;
 
-@Entity
-@Table(name = "audit_log", indexes = {
-        @Index(name = "idx_audit_log_time", columnList = "created_at")
-})
 public class AuditLog {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false, length = 50)
     private String username;
 
-    @Column(nullable = false, length = 30)
     private String action;
 
-    @Column(length = 200)
     private String target;
 
-    @Column(length = 500)
     private String detail;
 
-    @Column(length = 45)
     private String ip;
 
-    @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
     public Long getId() { return id; }

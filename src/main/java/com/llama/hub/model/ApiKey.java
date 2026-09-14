@@ -1,55 +1,35 @@
 package com.llama.hub.model;
 
-import jakarta.persistence.*;
 import java.time.LocalDateTime;
 
-@Entity
-@Table(name = "api_key", indexes = {
-        @Index(name = "idx_api_key_hash", columnList = "key_hash", unique = true)
-})
 public class ApiKey {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false, length = 100)
     private String name;
 
-    @Column(name = "key_hash", nullable = false, length = 64)
     private String keyHash;
 
-    @Column(name = "key_prefix", nullable = false, length = 16)
     private String keyPrefix;
 
-    @Column(name = "expires_at")
     private LocalDateTime expiresAt;
 
-    @Column(name = "token_quota")
     private Long tokenQuota;
 
-    @Column(name = "request_quota")
     private Long requestQuota;
 
-    @Column(name = "tokens_used", nullable = false)
     private Long tokensUsed = 0L;
 
-    @Column(name = "requests_used", nullable = false)
     private Long requestsUsed = 0L;
 
-    @Column(name = "is_active", nullable = false)
     private Boolean isActive = Boolean.TRUE;
 
-    @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
-    @Column(name = "last_used_at")
     private LocalDateTime lastUsedAt;
 
-    @Column(name = "hit_count", nullable = false)
     private Long hitCount = 0L;
 
-    @Column(name = "key_plain", columnDefinition = "TEXT")
     private String keyPlain;
 
     public Long getId() { return id; }

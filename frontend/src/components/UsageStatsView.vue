@@ -90,18 +90,15 @@ function fmtSpeed(v) {
       <AppButton
         variant="primary-green"
         :loading="loading" @click="search"
-      ><i v-if="!loading" class="fa-solid fa-magnifying-glass mr-1"></i>查询</AppButton>
+      ><i v-if="!loading" class="fa-solid fa-search mr-1"></i>查询</AppButton>
     </div>
 
     <p v-if="error" class="text-gh-red text-sm mb-3">{{ error }}</p>
-    <p v-else-if="!loading && items.length === 0 && total?.count === 0" class="text-gh-muted text-sm py-10 text-center">
-      该区间内暂无调用记录
-    </p>
 
-    <div v-if="result" class="bg-gh-panel border border-gh-border rounded-lg overflow-hidden">
+    <div v-if="result" class="panel-tech overflow-hidden">
       <table class="w-full text-sm">
         <thead>
-          <tr class="border-b border-gh-border text-left text-xs text-gh-muted">
+          <tr class="border-b border-gh-border bg-gh-tag/60 text-left text-xs text-gh-muted">
             <th class="px-3 py-2">Key 名称</th>
             <th class="px-3 py-2 text-right">请求数</th>
             <th class="px-3 py-2 text-right">输入 tok</th>
@@ -118,7 +115,7 @@ function fmtSpeed(v) {
           <tr v-if="items.length === 0">
             <td colspan="10" class="px-4 py-10 text-center text-gh-muted">暂无数据</td>
           </tr>
-          <tr v-for="i in items" :key="i.keyId" class="border-b border-gh-border/50">
+          <tr v-for="i in items" :key="i.keyId" class="border-b border-gh-border/40 hover:bg-gh-cyan/5 transition-colors">
             <td class="px-3 py-1.5 text-xs">{{ i.name }}</td>
             <td class="px-3 py-1.5 text-right font-mono text-xs">{{ fmtInt(i.count) }}</td>
             <td class="px-3 py-1.5 text-right font-mono text-xs">{{ fmtTok(i.promptTokens) }}</td>
@@ -133,7 +130,7 @@ function fmtSpeed(v) {
             </td>
           </tr>
           <!-- 合计 -->
-          <tr v-if="items.length > 0" class="bg-gh-tag/40 font-medium">
+          <tr v-if="items.length > 0" class="bg-gh-cyan/[0.06] font-medium border-t border-gh-cyan/20">
             <td class="px-3 py-2 text-xs">合计</td>
             <td class="px-3 py-2 text-right font-mono text-xs">{{ fmtInt(total.count) }}</td>
             <td class="px-3 py-2 text-right font-mono text-xs">{{ fmtTok(total.promptTokens) }}</td>
@@ -153,16 +150,18 @@ function fmtSpeed(v) {
 
 <style scoped>
 .usage-input {
-  padding: 4px 8px;
+  height: 30px;
+  padding: 0 8px;
   font-size: 12px;
-  line-height: 20px;
-  background: #ffffff;
-  border: 1px solid #d0d7de;
+  background: #0a111d;
+  border: 1px solid var(--color-gh-border);
   border-radius: 6px;
-  color: #24292f;
+  color: var(--color-gh-text);
   outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .usage-input:focus {
-  border-color: #0969da;
+  border-color: #22d3ee;
+  box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.14);
 }
 </style>

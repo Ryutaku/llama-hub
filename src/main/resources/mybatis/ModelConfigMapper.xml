@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.llama.hub.mapper.ModelConfigMapper">
+
+    <select id="findRow" resultType="com.llama.hub.model.ModelConfig">
+        SELECT id, config_json, source, updated_at
+        FROM model_config
+        WHERE id = #{id}
+    </select>
+
+    <insert id="insertRow" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO model_config (id, config_json, source, updated_at)
+        VALUES (#{id}, #{configJson}, #{source}, #{updatedAt})
+    </insert>
+
+    <update id="updateRow">
+        UPDATE model_config
+        SET config_json = #{configJson},
+            source = #{source},
+            updated_at = #{updatedAt}
+        WHERE id = #{id}
+    </update>
+
+</mapper>

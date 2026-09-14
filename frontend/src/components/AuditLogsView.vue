@@ -17,7 +17,7 @@ const endAt = ref(today())
 const logs = ref([])
 const total = ref(0)
 const page = ref(1)
-const size = ref(50)
+const size = ref(20)
 const loading = ref(false)
 const error = ref('')
 
@@ -84,15 +84,15 @@ function actionInfo(a) {
       <AppButton
         variant="primary-green"
         :loading="loading" @click="search"
-      ><i v-if="!loading" class="fa-solid fa-magnifying-glass mr-1"></i>查询</AppButton>
+      ><i v-if="!loading" class="fa-solid fa-search mr-1"></i>查询</AppButton>
     </div>
 
     <p v-if="error" class="text-gh-red text-sm mb-3">{{ error }}</p>
 
-    <div class="bg-gh-panel border border-gh-border rounded-lg overflow-hidden">
+    <div class="panel-tech overflow-hidden">
       <table class="w-full text-sm">
         <thead>
-          <tr class="border-b border-gh-border text-left text-xs text-gh-muted">
+          <tr class="border-b border-gh-border bg-gh-tag/60 text-left text-xs text-gh-muted">
             <th class="px-3 py-2">时间</th>
             <th class="px-3 py-2">用户</th>
             <th class="px-3 py-2">动作</th>
@@ -105,7 +105,7 @@ function actionInfo(a) {
           <tr v-if="!loading && logs.length === 0">
             <td colspan="6" class="px-4 py-10 text-center text-gh-muted">暂无记录</td>
           </tr>
-          <tr v-for="l in logs" :key="l.id" class="border-b border-gh-border/50 hover:bg-gh-tag/40">
+          <tr v-for="l in logs" :key="l.id" class="border-b border-gh-border/40 hover:bg-gh-cyan/5 transition-colors">
             <td class="px-3 py-1.5 text-xs text-gh-muted font-mono whitespace-nowrap">{{ fmtTime(l.createdAt) }}</td>
             <td class="px-3 py-1.5 text-xs">{{ l.username }}</td>
             <td class="px-3 py-1.5">
