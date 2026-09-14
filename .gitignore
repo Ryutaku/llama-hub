@@ -1,6 +1,8 @@
 # 构建产物
 target/
 src/main/resources/static/
+META-INF/
+*.tar.gz
 
 # 前端依赖
 frontend/node_modules/
