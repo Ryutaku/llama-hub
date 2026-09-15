@@ -149,7 +149,7 @@ const tokChartOption = computed(() => {
 <template>
   <div>
     <div class="flex items-center justify-between mb-3">
-      <h2 class="text-base font-semibold">用量仪表盘</h2>
+      <h2 class="text-base font-semibold"><i class="fa-solid fa-gauge-high mr-1.5 text-gh-cyan"></i>用量仪表盘</h2>
       <AppButton variant="secondary" :loading="loading" @click="loading = true; load()"
       ><i class="fa-solid fa-rotate-right mr-1" :class="{ 'fa-spin': loading }"></i>刷新</AppButton>
     </div>
@@ -195,8 +195,8 @@ const tokChartOption = computed(() => {
           <i class="fa-solid fa-chart-line mr-1.5 text-gh-cyan"></i>
           近 7 天请求量
         </div>
-        <EChart v-if="hasTrend" :option="reqChartOption" />
-        <div v-else class="h-24 flex items-center justify-center text-gh-muted text-sm">
+        <EChart v-if="hasTrend" :option="reqChartOption" height="150px" />
+        <div v-else class="h-[150px] flex items-center justify-center text-gh-muted text-sm">
           近 7 天暂无数据
         </div>
       </div>
@@ -205,8 +205,8 @@ const tokChartOption = computed(() => {
           <i class="fa-solid fa-coins mr-1.5 text-gh-green"></i>
           近 7 天 Tokens 消耗
         </div>
-        <EChart v-if="hasTrend" :option="tokChartOption" />
-        <div v-else class="h-24 flex items-center justify-center text-gh-muted text-sm">
+        <EChart v-if="hasTrend" :option="tokChartOption" height="150px" />
+        <div v-else class="h-[150px] flex items-center justify-center text-gh-muted text-sm">
           近 7 天暂无数据
         </div>
       </div>
