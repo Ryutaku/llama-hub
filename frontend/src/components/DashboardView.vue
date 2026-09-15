@@ -92,6 +92,7 @@ const reqChartOption = computed(() => {
       symbolSize: 5,
       lineStyle: { color: '#22d3ee', width: 2 },
       itemStyle: { color: '#22d3ee' },
+      emphasis: { disabled: true },
       areaStyle: {
         color: {
           type: 'linear', x1: 0, y1: 0, x2: 0, y2: 1,
