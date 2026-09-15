@@ -107,41 +107,50 @@ const reqChartOption = computed(() => {
 
 const tokChartOption = computed(() => {
   const trend = data.value?.trend || []
+  const num = v => Math.max(0, Number(v) || 0)
   return {
     ...AXES,
+    grid: { left: 4, right: 8, top: 26, bottom: 4, containLabel: true },
     xAxis: { ...AXES.xAxis, data: trend.map(d => d.date) },
     yAxis: {
       ...AXES.yAxis,
       axisLabel: { ...AXES.yAxis.axisLabel, formatter: v => fmtTok(v) }
     },
     tooltip: baseTooltip('', v => fmtTok(v)),
-    series: [{
-      name: 'Tokens',
-      type: 'bar',
-      data: trend.map(d => d.tokens),
-      barMaxWidth: 26,
-      itemStyle: {
-        borderRadius: [4, 4, 0, 0],
-        color: {
-          type: 'linear', x1: 0, y1: 0, x2: 0, y2: 1,
-          colorStops: [
-            { offset: 0, color: 'rgba(25,181,132,0.9)' },
-            { offset: 1, color: 'rgba(25,181,132,0.35)' }
-          ]
-        }
+    legend: {
+      top: 0,
+      right: 0,
+      itemWidth: 10,
+      itemHeight: 8,
+      itemGap: 12,
+      textStyle: { color: '#7e90a9', fontSize: 10 }
+    },
+    series: [
+      {
+        name: '缓存',
+        type: 'bar',
+        stack: 'tok',
+        data: trend.map(d => num(d.cachedTokens)),
+        barMaxWidth: 26,
+        itemStyle: { color: 'rgba(25,181,132,0.4)' }
       },
-      emphasis: {
-        itemStyle: {
-          color: {
-            type: 'linear', x1: 0, y1: 0, x2: 0, y2: 1,
-            colorStops: [
-              { offset: 0, color: 'rgba(25,181,132,1)' },
-              { offset: 1, color: 'rgba(25,181,132,0.55)' }
-            ]
-          }
-        }
+      {
+        name: '输入',
+        type: 'bar',
+        stack: 'tok',
+        data: trend.map(d => num(d.promptTokens) - num(d.cachedTokens)),
+        barMaxWidth: 26,
+        itemStyle: { color: '#19b584' }
+      },
+      {
+        name: '输出',
+        type: 'bar',
+        stack: 'tok',
+        data: trend.map(d => num(d.completionTokens)),
+        barMaxWidth: 26,
+        itemStyle: { color: '#22d3ee', borderRadius: [4, 4, 0, 0] }
       }
-    }]
+    ]
   }
 })
 </script>

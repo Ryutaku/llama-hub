@@ -53,10 +53,14 @@ public class StatsService {
         LocalDate start = LocalDate.now().minusDays(6);
         Map<String, Object[]> byDate = new LinkedHashMap<>();
         for (Map<String, Object> row : jdbcTemplate.queryForList(
-                "SELECT CAST(started_at AS DATE) AS \"d\", COUNT(*) AS \"cnt\", COALESCE(SUM(total_tokens),0) AS \"tok\" "
+                "SELECT CAST(started_at AS DATE) AS \"d\", COUNT(*) AS \"cnt\", COALESCE(SUM(total_tokens),0) AS \"tok\", "
+                        + "COALESCE(SUM(prompt_tokens),0) AS \"prompt\", COALESCE(SUM(completion_tokens),0) AS \"comp\", "
+                        + "COALESCE(SUM(cached_tokens),0) AS \"cached\" "
                         + "FROM call_log WHERE started_at >= ? GROUP BY CAST(started_at AS DATE)", start.atStartOfDay())) {
             byDate.put(String.valueOf(row.get("d")),
-                    new Object[]{ ((Number) row.get("cnt")).longValue(), ((Number) row.get("tok")).longValue() });
+                    new Object[]{ ((Number) row.get("cnt")).longValue(), ((Number) row.get("tok")).longValue(),
+                            ((Number) row.get("prompt")).longValue(), ((Number) row.get("comp")).longValue(),
+                            ((Number) row.get("cached")).longValue() });
         }
         List<Map<String, Object>> trend = new ArrayList<>();
         for (int i = 0; i < 7; i++) {
@@ -67,6 +71,9 @@ public class StatsService {
             day.put("dateFull", d.toString());
             day.put("count", rec == null ? 0 : ((Long) rec[0]));
             day.put("tokens", rec == null ? 0 : ((Long) rec[1]));
+            day.put("promptTokens", rec == null ? 0L : ((Long) rec[2]));
+            day.put("completionTokens", rec == null ? 0L : ((Long) rec[3]));
+            day.put("cachedTokens", rec == null ? 0L : ((Long) rec[4]));
             trend.add(day);
         }
         m.put("trend", trend);
