@@ -22,8 +22,19 @@ function render() {
 onMounted(async () => {
   await nextTick()
   render()
+  if (!el.value) return
+  let lastW = el.value.clientWidth
+  let lastH = el.value.clientHeight
+  // ResizeObserver 首次 observe 会立即 report 一次，若直接 resize()
+  // 会以 animation.duration=0 打断 ECharts 的入场动画；只在尺寸真的变了才 resize
   ro = new ResizeObserver(() => {
-    chart && chart.resize()
+    if (!chart || !el.value) return
+    const w = el.value.clientWidth
+    const h = el.value.clientHeight
+    if (w === lastW && h === lastH) return
+    lastW = w
+    lastH = h
+    chart.resize()
   })
   ro.observe(el.value)
 })
