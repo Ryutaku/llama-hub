@@ -455,8 +455,12 @@ public class ProxyService {
         // Anthropic Messages SSE：message_start 携带 input_tokens 与 cache_read_input_tokens，message_delta 携带 output_tokens。
         // 合并为 Anthropic 风格 usage 供 parseUsage 统一采集（否则 Anthropic 流式无法统计用量）。
         if (line.startsWith("data:")) {
+            String payload = line.substring(5).trim();
+            if (payload.isEmpty() || "[DONE]".equals(payload)) {
+                return line;
+            }
             try {
-                JsonNode root = objectMapper.readTree(line.substring(5).trim());
+                JsonNode root = objectMapper.readTree(payload);
                 String type = root.path("type").asText(null);
                 if ("message_start".equals(type)) {
                     JsonNode usage = root.path("message").path("usage");
