@@ -101,9 +101,9 @@ function fmtSpeed(v) {
           <tr class="border-b border-gh-border bg-gh-tag/60 text-left text-xs text-gh-muted">
             <th class="px-3 py-2">Key 名称</th>
             <th class="px-3 py-2 text-right">请求数</th>
+            <th class="px-3 py-2 text-right">总 tok</th>
             <th class="px-3 py-2 text-right">输入 tok</th>
             <th class="px-3 py-2 text-right">输出 tok</th>
-            <th class="px-3 py-2 text-right">总 tok</th>
             <th class="px-3 py-2 text-right">缓存 tok</th>
             <th class="px-3 py-2 text-right">命中率</th>
             <th class="px-3 py-2 text-right">平均速度</th>
@@ -118,9 +118,9 @@ function fmtSpeed(v) {
           <tr v-for="i in items" :key="i.keyId" class="border-b border-gh-border/40 hover:bg-gh-cyan/5 transition-colors">
             <td class="px-3 py-1.5 text-xs">{{ i.name }}</td>
             <td class="px-3 py-1.5 text-right font-mono text-xs">{{ fmtInt(i.count) }}</td>
-            <td class="px-3 py-1.5 text-right font-mono text-xs">{{ fmtTok(i.promptTokens) }}</td>
-            <td class="px-3 py-1.5 text-right font-mono text-xs">{{ fmtTok(i.completionTokens) }}</td>
-            <td class="px-3 py-1.5 text-right font-mono text-xs font-semibold">{{ fmtTok(i.totalTokens) }}</td>
+              <td class="px-3 py-1.5 text-right font-mono text-xs font-semibold">{{ fmtTok(i.totalTokens) }}</td>
+              <td class="px-3 py-1.5 text-right font-mono text-xs">{{ fmtTok(i.promptTokens) }}</td>
+              <td class="px-3 py-1.5 text-right font-mono text-xs">{{ fmtTok(i.completionTokens) }}</td>
             <td class="px-3 py-1.5 text-right font-mono text-xs">{{ fmtTok(i.cachedTokens) }}</td>
             <td class="px-3 py-1.5 text-right font-mono text-xs">{{ fmtPct(i.cacheHitRate) }}</td>
             <td class="px-3 py-1.5 text-right font-mono text-xs">{{ fmtSpeed(i.avgSpeed) }}</td>
@@ -133,9 +133,9 @@ function fmtSpeed(v) {
           <tr v-if="items.length > 0" class="bg-gh-cyan/[0.06] font-medium border-t border-gh-cyan/20">
             <td class="px-3 py-2 text-xs">合计</td>
             <td class="px-3 py-2 text-right font-mono text-xs">{{ fmtInt(total.count) }}</td>
-            <td class="px-3 py-2 text-right font-mono text-xs">{{ fmtTok(total.promptTokens) }}</td>
-            <td class="px-3 py-2 text-right font-mono text-xs">{{ fmtTok(total.completionTokens) }}</td>
-            <td class="px-3 py-2 text-right font-mono text-xs font-semibold">{{ fmtTok(total.totalTokens) }}</td>
+              <td class="px-3 py-2 text-right font-mono text-xs font-semibold">{{ fmtTok(total.totalTokens) }}</td>
+              <td class="px-3 py-2 text-right font-mono text-xs">{{ fmtTok(total.promptTokens) }}</td>
+              <td class="px-3 py-2 text-right font-mono text-xs">{{ fmtTok(total.completionTokens) }}</td>
             <td class="px-3 py-2 text-right font-mono text-xs">{{ fmtTok(total.cachedTokens) }}</td>
             <td class="px-3 py-2 text-right font-mono text-xs">{{ fmtPct(total.cacheHitRate) }}</td>
             <td class="px-3 py-2 text-right font-mono text-xs">—</td>

@@ -144,9 +144,9 @@ function toggle(row) {
             <th class="px-3 py-2">时间</th>
             <th class="px-3 py-2">Key</th>
             <th class="px-3 py-2">端点</th>
+            <th class="px-3 py-2 text-right">总 tok</th>
             <th class="px-3 py-2 text-right">入 tok</th>
             <th class="px-3 py-2 text-right">出 tok</th>
-            <th class="px-3 py-2 text-right">总 tok</th>
             <th class="px-3 py-2 text-right">缓存 tok</th>
             <th class="px-3 py-2 text-right">命中率</th>
             <th class="px-3 py-2 text-right">速度</th>
@@ -163,9 +163,9 @@ function toggle(row) {
               <td class="px-3 py-1.5 text-xs text-gh-muted font-mono whitespace-nowrap">{{ fmtTime(l.startedAt) }}</td>
               <td class="px-3 py-1.5 text-xs">{{ l.keyName }}</td>
               <td class="px-3 py-1.5 text-xs font-mono text-gh-muted">{{ l.endpoint }}</td>
+              <td class="px-3 py-1.5 text-right font-mono text-xs">{{ fmtTok(l.totalTokens) }}</td>
               <td class="px-3 py-1.5 text-right font-mono text-xs">{{ fmtTok(l.promptTokens) }}</td>
               <td class="px-3 py-1.5 text-right font-mono text-xs">{{ fmtTok(l.completionTokens) }}</td>
-              <td class="px-3 py-1.5 text-right font-mono text-xs">{{ fmtTok(l.totalTokens) }}</td>
               <td class="px-3 py-1.5 text-right font-mono text-xs">{{ fmtTok(l.cachedTokens) }}</td>
               <td class="px-3 py-1.5 text-right font-mono text-xs">{{ fmtHit(l.cacheHitRate) }}</td>
               <td class="px-3 py-1.5 text-right font-mono text-xs">{{ fmtRate(l.tokensPerSec) }}</td>
