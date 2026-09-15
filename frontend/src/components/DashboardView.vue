@@ -126,6 +126,7 @@ const reqChartOption = computed(() => {
   return {
     ...AXES,
     animationDuration: 1000,
+    animationDelay: 250,
     animationEasing: 'cubicOut',
     xAxis: { ...AXES.xAxis, data: trend.map(d => d.date) },
     tooltip: baseTooltip('', fmtInt),
@@ -159,6 +160,7 @@ const tokChartOption = computed(() => {
   return {
     ...AXES,
     animationDuration: 800,
+    animationDelay: 320,
     animationEasing: 'cubicOut',
     grid: { left: 4, right: 8, top: 26, bottom: 4, containLabel: true },
     xAxis: { ...AXES.xAxis, data: trend.map(d => d.date) },
@@ -182,7 +184,7 @@ const tokChartOption = computed(() => {
         stack: 'tok',
         data: trend.map(d => num(d.cachedTokens)),
         barMaxWidth: 26,
-        animationDelay: i => i * 40,
+        animationDelay: i => 320 + i * 40,
         itemStyle: { color: 'rgba(25,181,132,0.4)' }
       },
       {
@@ -191,7 +193,7 @@ const tokChartOption = computed(() => {
         stack: 'tok',
         data: trend.map(d => num(d.promptTokens) - num(d.cachedTokens)),
         barMaxWidth: 26,
-        animationDelay: i => 100 + i * 40,
+        animationDelay: i => 420 + i * 40,
         itemStyle: { color: '#19b584' }
       },
       {
@@ -200,7 +202,7 @@ const tokChartOption = computed(() => {
         stack: 'tok',
         data: trend.map(d => num(d.completionTokens)),
         barMaxWidth: 26,
-        animationDelay: i => 200 + i * 40,
+        animationDelay: i => 520 + i * 40,
         itemStyle: { color: '#22d3ee', borderRadius: [4, 4, 0, 0] }
       }
     ]
