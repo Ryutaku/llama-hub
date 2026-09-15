@@ -105,7 +105,7 @@ function toggle(row) {
 <template>
   <div>
     <div class="flex items-center justify-between mb-3">
-      <h2 class="text-base font-semibold">调用日志</h2>
+      <h2 class="text-base font-semibold"><i class="fa-solid fa-table-list mr-1.5 text-gh-cyan"></i>调用日志</h2>
       <AppButton
         variant="secondary"
         :loading="exporting" :disabled="exporting" @click="doExport"

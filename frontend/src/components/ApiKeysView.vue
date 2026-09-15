@@ -211,7 +211,7 @@ function barColor(bar) {
 <template>
   <div>
     <div class="flex items-center justify-between mb-3">
-      <h2 class="text-base font-semibold">API Keys</h2>
+      <h2 class="text-base font-semibold"><i class="fa-solid fa-key mr-1.5 text-gh-cyan"></i>API Keys</h2>
       <AppButton variant="primary-green" @click="openCreate"
       ><i class="fa-solid fa-plus mr-1"></i>新建 Key</AppButton>
     </div>
