@@ -1,8 +1,9 @@
 ﻿<script setup>
-import { ref, computed, onMounted, defineComponent, h } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { api } from '../api'
 import { fmtTok } from '../ui'
 import AppButton from './AppButton.vue'
+import EChart from './EChart.vue'
 
 const props = defineProps({
   upstream: { type: Object, default: () => ({ up: false, latencyMs: null }) },
@@ -45,114 +46,102 @@ function barWidth(v) {
   return Math.min(100, Math.round(v * 100))
 }
 
-const LineChart = defineComponent({
-  props: {
-    data: { type: Array, default: () => [] },
-    color: { type: String, default: '#22d3ee' },
-    id: { type: String, default: 'chart' },
-    fmt: { type: Function, default: null }
+const AXES = {
+  xAxis: {
+    type: 'category',
+    axisLine: { lineStyle: { color: 'rgba(126,144,169,0.25)' } },
+    axisTick: { show: false },
+    axisLabel: { color: '#7e90a9', fontSize: 10, fontFamily: 'monospace' }
   },
-  setup(props) {
-    const W = 320
-    const H = 90
-    const PAD = 6
-    const hover = ref(-1)
+  yAxis: {
+    type: 'value',
+    splitLine: { lineStyle: { color: 'rgba(126,144,169,0.14)', type: 'dashed' } },
+    axisLine: { show: false },
+    axisTick: { show: false },
+    axisLabel: { color: '#7e90a9', fontSize: 10, fontFamily: 'monospace' }
+  },
+  grid: { left: 4, right: 8, top: 14, bottom: 4, containLabel: true }
+}
 
-    function geom() {
-      const arr = props.data || []
-      if (arr.length === 0) return null
-      const max = Math.max(1, ...arr.map(d => Number(d.value) || 0))
-      const pts = arr.map((d, i) => {
-        const x = PAD + (i * (W - PAD * 2)) / Math.max(arr.length - 1, 1)
-        const y = H - PAD - ((Number(d.value) || 0) / max) * (H - PAD * 2)
-        return [x, y]
-      })
-      const line = pts.map(p => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ')
-      const area = `${PAD},${H - PAD} ${line} ${W - PAD},${H - PAD}`
-      return { pts, line, area, last: pts[pts.length - 1] }
-    }
+function baseTooltip(unit, fmt) {
+  return {
+    trigger: 'axis',
+    backgroundColor: 'rgba(10,17,29,0.95)',
+    borderColor: 'rgba(34,211,238,0.35)',
+    borderWidth: 1,
+    padding: [6, 10],
+    textStyle: { color: '#d9e4f2', fontSize: 12 },
+    valueFormatter: v => `${fmt(Number(v) || 0)}${unit ? ' ' + unit : ''}`
+  }
+}
 
-    function onMove(e) {
-      const arr = props.data || []
-      if (arr.length === 0) return
-      const rect = e.currentTarget.getBoundingClientRect()
-      const x = (e.clientX - rect.left) / rect.width * W
-      const i = Math.round((x - PAD) * (arr.length - 1) / (W - PAD * 2))
-      hover.value = Math.max(0, Math.min(arr.length - 1, i))
-    }
+const hasTrend = computed(() => (data.value?.trend || []).length > 0)
 
-    return () => {
-      const g = geom()
-      if (!g) return h('div', { class: 'h-20' })
-      const gid = 'lg-' + props.id
-      const fmt = props.fmt || (v => v)
-      const el = [
-        h('defs', {}, [
-          h('linearGradient', { id: gid, x1: '0', y1: '0', x2: '0', y2: '1' }, [
-            h('stop', { offset: '0%', 'stop-color': props.color, 'stop-opacity': '0.3' }),
-            h('stop', { offset: '100%', 'stop-color': props.color, 'stop-opacity': '0' })
-          ])
-        ]),
-        [0.25, 0.5, 0.75].map(f =>
-          h('line', {
-            x1: PAD,
-            x2: W - PAD,
-            y1: H * f,
-            y2: H * f,
-            stroke: 'rgba(126,144,169,0.16)',
-            'stroke-width': '1',
-            'stroke-dasharray': '3 5'
-          })
-        ),
-        h('polygon', { points: g.area, fill: `url(#${gid})` }),
-        h('polyline', {
-          points: g.line,
-          fill: 'none',
-          stroke: props.color,
-          'stroke-width': '2',
-          'stroke-linejoin': 'round',
-          'stroke-linecap': 'round',
-          style: `filter: drop-shadow(0 0 5px ${props.color}88)`
-        }),
-        h('circle', {
-          cx: g.last[0],
-          cy: g.last[1],
-          r: '2.5',
-          fill: props.color,
-          style: `filter: drop-shadow(0 0 6px ${props.color})`
-        })
-      ]
-      if (hover.value >= 0 && hover.value < g.pts.length) {
-        const [hx, hy] = g.pts[hover.value]
-        el.push(
-          h('line', {
-            x1: hx, x2: hx, y1: PAD, y2: H - PAD,
-            stroke: 'rgba(148,163,184,0.35)', 'stroke-width': '1', 'stroke-dasharray': '3 3'
-          }),
-          h('circle', { cx: hx, cy: hy, r: '4', fill: props.color, stroke: '#090e17', 'stroke-width': '1.5' })
-        )
+const reqChartOption = computed(() => {
+  const trend = data.value?.trend || []
+  return {
+    ...AXES,
+    xAxis: { ...AXES.xAxis, data: trend.map(d => d.date) },
+    tooltip: baseTooltip('', fmtInt),
+    series: [{
+      name: '请求数',
+      type: 'line',
+      data: trend.map(d => d.count),
+      smooth: true,
+      symbol: 'circle',
+      symbolSize: 5,
+      lineStyle: { color: '#22d3ee', width: 2 },
+      itemStyle: { color: '#22d3ee' },
+      areaStyle: {
+        color: {
+          type: 'linear', x1: 0, y1: 0, x2: 0, y2: 1,
+          colorStops: [
+            { offset: 0, color: 'rgba(34,211,238,0.28)' },
+            { offset: 1, color: 'rgba(34,211,238,0)' }
+          ]
+        }
       }
-      const svg = h('svg', {
-        viewBox: `0 0 ${W} ${H}`,
-        preserveAspectRatio: 'none',
-        class: 'w-full h-20 cursor-crosshair',
-        onMousemove: onMove,
-        onMouseleave: () => { hover.value = -1 }
-      }, el)
-      const tip = (hover.value >= 0 && hover.value < g.pts.length)
-        ? h('div', {
-            class: 'absolute -top-1 -translate-x-1/2 -translate-y-full px-2 py-1 rounded-md text-[11px] font-mono pointer-events-none whitespace-nowrap z-10',
-            style: {
-              left: (g.pts[hover.value][0] / W * 100) + '%',
-              color: props.color,
-              background: 'rgba(10,17,29,0.95)',
-              border: `1px solid ${props.color}55`,
-              boxShadow: '0 4px 12px -4px rgba(0,0,0,0.8)'
-            }
-          }, `${props.data[hover.value].label || ''} ${fmt(Number(props.data[hover.value].value) || 0)}`)
-        : null
-      return h('div', { class: 'relative' }, [svg, tip])
-    }
+    }]
+  }
+})
+
+const tokChartOption = computed(() => {
+  const trend = data.value?.trend || []
+  return {
+    ...AXES,
+    xAxis: { ...AXES.xAxis, data: trend.map(d => d.date) },
+    yAxis: {
+      ...AXES.yAxis,
+      axisLabel: { ...AXES.yAxis.axisLabel, formatter: v => fmtTok(v) }
+    },
+    tooltip: baseTooltip('', v => fmtTok(v)),
+    series: [{
+      name: 'Tokens',
+      type: 'bar',
+      data: trend.map(d => d.tokens),
+      barMaxWidth: 26,
+      itemStyle: {
+        borderRadius: [4, 4, 0, 0],
+        color: {
+          type: 'linear', x1: 0, y1: 0, x2: 0, y2: 1,
+          colorStops: [
+            { offset: 0, color: 'rgba(25,181,132,0.9)' },
+            { offset: 1, color: 'rgba(25,181,132,0.35)' }
+          ]
+        }
+      },
+      emphasis: {
+        itemStyle: {
+          color: {
+            type: 'linear', x1: 0, y1: 0, x2: 0, y2: 1,
+            colorStops: [
+              { offset: 0, color: 'rgba(25,181,132,1)' },
+              { offset: 1, color: 'rgba(25,181,132,0.55)' }
+            ]
+          }
+        }
+      }
+    }]
   }
 })
 </script>
@@ -203,22 +192,22 @@ const LineChart = defineComponent({
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-4">
       <div class="panel-tech p-3.5">
         <div class="flex items-center gap-2 text-sm text-gh-muted mb-2">
-          <span class="w-1 h-3.5 rounded-full bg-gh-cyan shadow-[0_0_8px_rgba(34,211,238,0.8)]"></span>
+          <i class="fa-solid fa-chart-line mr-1.5 text-gh-cyan"></i>
           近 7 天请求量
         </div>
-        <LineChart id="req" :data="(data?.trend || []).map(d => ({ label: d.date, value: d.count }))" :fmt="fmtInt" color="#22d3ee" />
-        <div class="flex justify-between text-[10px] text-gh-muted mt-1.5 font-mono">
-          <span v-for="d in data?.trend || []" :key="d.date">{{ d.date }}</span>
+        <EChart v-if="hasTrend" :option="reqChartOption" />
+        <div v-else class="h-24 flex items-center justify-center text-gh-muted text-sm">
+          近 7 天暂无数据
         </div>
       </div>
       <div class="panel-tech p-3.5">
         <div class="flex items-center gap-2 text-sm text-gh-muted mb-2">
-          <span class="w-1 h-3.5 rounded-full bg-gh-green shadow-[0_0_8px_rgba(25,181,132,0.8)]"></span>
+          <i class="fa-solid fa-coins mr-1.5 text-gh-green"></i>
           近 7 天 Tokens 消耗
         </div>
-        <LineChart id="tok" :data="(data?.trend || []).map(d => ({ label: d.date, value: d.tokens }))" :fmt="fmtTok" color="#19b584" />
-        <div class="flex justify-between text-[10px] text-gh-muted mt-1.5 font-mono">
-          <span v-for="d in data?.trend || []" :key="d.date">{{ d.date }}</span>
+        <EChart v-if="hasTrend" :option="tokChartOption" />
+        <div v-else class="h-24 flex items-center justify-center text-gh-muted text-sm">
+          近 7 天暂无数据
         </div>
       </div>
     </div>
@@ -226,7 +215,7 @@ const LineChart = defineComponent({
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
       <!-- top keys -->
       <div class="panel-tech p-3.5">
-        <div class="text-sm text-gh-muted mb-3">今日 Top 5 活跃 Key</div>
+        <div class="text-sm text-gh-muted mb-3"><i class="fa-solid fa-ranking-star mr-1.5 text-gh-cyan"></i>今日 Top 5 活跃 Key</div>
         <div v-if="!data?.topKeys || data.topKeys.length === 0" class="text-gh-muted text-sm py-6 text-center">
           今日暂无调用
         </div>
@@ -253,7 +242,7 @@ const LineChart = defineComponent({
 
       <!-- upstream status -->
       <div class="panel-tech p-3.5">
-        <div class="text-sm text-gh-muted mb-3">上游状态（llama-server）</div>
+        <div class="text-sm text-gh-muted mb-3"><i class="fa-solid fa-server mr-1.5 text-gh-green"></i>上游状态（llama-server）</div>
         <div class="flex items-center gap-3.5">
           <span
             class="w-3.5 h-3.5 rounded-full"
