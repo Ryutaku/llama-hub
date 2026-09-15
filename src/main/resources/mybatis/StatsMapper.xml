@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.llama.hub.mapper.StatsMapper">
+
+    <select id="todayStats" resultType="com.llama.hub.model.TodayStatsVO">
+        SELECT COUNT(*) AS "requests",
+               COALESCE(SUM(total_tokens), 0) AS "tokens",
+               COALESCE(SUM(cached_tokens), 0) AS "cached",
+               COALESCE(SUM(prompt_tokens), 0) AS "prompt"
+        FROM call_log
+        WHERE started_at >= #{start}
+    </select>
+
+    <select id="countActiveKeys" resultType="long">
+        SELECT COUNT(*)
+        FROM api_key
+        WHERE last_used_at >= #{start}
+    </select>
+
+    <select id="trendByDay" resultType="com.llama.hub.model.TrendRowVO">
+        SELECT CAST(started_at AS DATE) AS "d",
+               COUNT(*) AS "cnt",
+               COALESCE(SUM(total_tokens), 0) AS "tok",
+               COALESCE(SUM(prompt_tokens), 0) AS "prompt",
+               COALESCE(SUM(completion_tokens), 0) AS "comp",
+               COALESCE(SUM(cached_tokens), 0) AS "cached"
+        FROM call_log
+        WHERE started_at >= #{start}
+        GROUP BY CAST(started_at AS DATE)
+    </select>
+
+    <select id="topKeys" resultType="com.llama.hub.model.DashboardInfo$TopKey">
+        SELECT cl.key_id AS "keyId",
+               COALESCE(k.name, '(deleted)') AS "name",
+               COUNT(*) AS "count",
+               COALESCE(SUM(cl.total_tokens), 0) AS "tokens"
+        FROM call_log cl
+                 LEFT JOIN api_key k ON k.id = cl.key_id
+        WHERE cl.started_at >= #{start}
+        GROUP BY cl.key_id, k.name
+        ORDER BY "count" DESC
+        LIMIT 5
+    </select>
+
+    <select id="usageByKey" resultType="com.llama.hub.model.UsageRowVO">
+        SELECT cl.key_id AS "keyId",
+               COALESCE(k.name, '(deleted)') AS "name",
+               COUNT(*) AS "count",
+               COALESCE(SUM(cl.prompt_tokens), 0) AS "prompt",
+               COALESCE(SUM(cl.completion_tokens), 0) AS "completion",
+               COALESCE(SUM(cl.total_tokens), 0) AS "total",
+               COALESCE(SUM(cl.cached_tokens), 0) AS "cached",
+               AVG(cl.tokens_per_sec) AS "avgSpeed",
+               AVG(cl.duration_ms) AS "avgDuration",
+               SUM(CASE WHEN cl.status_code IS NOT NULL AND cl.status_code >= 400 THEN 1 ELSE 0 END) AS "errors"
+        FROM call_log cl
+                 LEFT JOIN api_key k ON k.id = cl.key_id
+        WHERE 1 = 1
+        <if test="keyId != null and keyId > 0">
+            AND cl.key_id = #{keyId}
+        </if>
+        <if test="start != null">
+            AND cl.started_at >= #{start}
+        </if>
+        <if test="end != null">
+            AND cl.started_at <![CDATA[<]]> #{end}
+        </if>
+        GROUP BY cl.key_id, k.name
+        ORDER BY "count" DESC
+    </select>
+
+</mapper>

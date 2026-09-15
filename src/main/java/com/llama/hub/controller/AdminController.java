@@ -4,8 +4,16 @@ import com.github.pagehelper.PageHelper;
 import com.github.pagehelper.PageInfo;
 import com.llama.hub.mapper.AuditLogMapper;
 import com.llama.hub.mapper.CallLogMapper;
+import com.llama.hub.model.ApiKey;
 import com.llama.hub.model.AuditLog;
 import com.llama.hub.model.CallLog;
+import com.llama.hub.model.DashboardInfo;
+import com.llama.hub.model.KeyCreateResult;
+import com.llama.hub.model.KeyInfo;
+import com.llama.hub.model.PageResult;
+import com.llama.hub.model.RevealResult;
+import com.llama.hub.model.UpstreamStatusInfo;
+import com.llama.hub.model.UsageStatsInfo;
 import com.llama.hub.service.AuditService;
 import com.llama.hub.service.KeyService;
 import com.llama.hub.service.StatsService;
@@ -16,13 +24,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.servlet.http.HttpServletRequest;
-import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -53,31 +57,31 @@ public class AdminController {
     // ---------- dashboard ----------
 
     @GetMapping("/api/admin/dashboard")
-    public Map<String, Object> dashboard() {
+    public DashboardInfo dashboard() {
         return statsService.dashboard();
     }
 
     @GetMapping("/api/admin/upstream/status")
-    public Map<String, Object> upstreamStatus() {
+    public UpstreamStatusInfo upstreamStatus() {
         return healthService.status();
     }
 
     @GetMapping("/api/admin/stats/usage")
-    public Map<String, Object> usageStats(@RequestParam(required = false) Long keyId,
-                                          @RequestParam(required = false) String startAt,
-                                          @RequestParam(required = false) String endAt) {
+    public UsageStatsInfo usageStats(@RequestParam(required = false) Long keyId,
+                                     @RequestParam(required = false) String startAt,
+                                     @RequestParam(required = false) String endAt) {
         return statsService.usageStats(keyId, parseStart(startAt), parseEnd(endAt));
     }
 
     // ---------- api keys ----------
 
     @GetMapping("/api/admin/keys")
-    public List<Map<String, Object>> listKeys() {
+    public List<KeyInfo> listKeys() {
         return keyService.list();
     }
 
     @PostMapping("/api/admin/keys")
-    public Map<String, Object> createKey(@RequestBody Map<String, Object> body, HttpServletRequest request) {
+    public KeyCreateResult createKey(@RequestBody Map<String, Object> body, HttpServletRequest request) {
         String name = (String) body.get("name");
         if (name == null || name.trim().isEmpty()) {
             throw new IllegalArgumentException("名称不能为空");
@@ -87,7 +91,7 @@ public class AdminController {
         if (number == null || number < 1 || unit == null || unit.isEmpty()) {
             throw new IllegalArgumentException("有效期不能为空");
         }
-        Map<String, Object> created = keyService.create(name.trim(), number, unit,
+        KeyCreateResult created = keyService.create(name.trim(), number, unit,
                 toLong(body.get("tokenQuota")), toLong(body.get("requestQuota")));
         auditService.record(username(request), "KEY_CREATE", name,
                 "expires: " + number + " " + unit, request.getRemoteAddr());
@@ -95,8 +99,8 @@ public class AdminController {
     }
 
     @PutMapping("/api/admin/keys/{id}")
-    public Map<String, Object> updateKey(@PathVariable Long id, @RequestBody Map<String, Object> body,
-                                         HttpServletRequest request) {
+    public KeyInfo updateKey(@PathVariable Long id, @RequestBody Map<String, Object> body,
+                             HttpServletRequest request) {
         Integer number = toInt(body.get("number"));
         String unit = (String) body.get("unit");
         Boolean isActive = toBool(body.get("isActive"));
@@ -109,44 +113,38 @@ public class AdminController {
         }
         Long tokenQuotaArg = hasQuota ? tokenQuota : null;
         Long requestQuotaArg = hasQuota ? requestQuota : null;
-        Map<String, Object> updated = keyService.update(id,
+        KeyInfo updated = keyService.update(id,
                 hasExpiry ? number : null, hasExpiry ? unit : null, isActive,
                 hasQuota ? tokenQuotaArg : null, hasQuota ? requestQuotaArg : null);
-        auditService.record(username(request), "KEY_UPDATE", (String) updated.get("name"),
+        auditService.record(username(request), "KEY_UPDATE", updated.getName(),
                 "id: " + id, request.getRemoteAddr());
         return updated;
     }
 
     @DeleteMapping("/api/admin/keys/{id}")
-    public Map<String, Object> deleteKey(@PathVariable Long id, HttpServletRequest request) {
-        Map<String, Object> key = keyService.list().stream()
-                .filter(m -> m.get("id") != null && id.equals(m.get("id")))
-                .findFirst().orElse(null);
+    public ResponseEntity<Void> deleteKey(@PathVariable Long id, HttpServletRequest request) {
+        ApiKey key = keyService.findById(id);
         keyService.delete(id);
         auditService.record(username(request), "KEY_DELETE",
-                key == null ? "id:" + id : (String) key.get("name"), "id: " + id, request.getRemoteAddr());
-        Map<String, Object> m = new LinkedHashMap<>();
-        m.put("ok", true);
-        return m;
+                key == null ? "id:" + id : key.getName(), "id: " + id, request.getRemoteAddr());
+        return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/api/admin/keys/{id}/reveal")
-    public Map<String, Object> revealKey(@PathVariable Long id, HttpServletRequest request) {
+    public RevealResult revealKey(@PathVariable Long id, HttpServletRequest request) {
         String plain = keyService.reveal(id);
         if (plain == null) {
             throw new IllegalArgumentException("该 Key 未保存明文副本，无法找回（旧密钥可删除重建）");
         }
         auditService.record(username(request), "KEY_REVEAL",
                 String.valueOf(id), "key revealed", request.getRemoteAddr());
-        Map<String, Object> m = new LinkedHashMap<>();
-        m.put("key", plain);
-        return m;
+        return new RevealResult(plain);
     }
 
     // ---------- call logs ----------
 
     @GetMapping("/api/admin/logs")
-    public Map<String, Object> logs(@RequestParam(required = false) Long keyId,
+    public PageResult<CallLog> logs(@RequestParam(required = false) Long keyId,
                                     @RequestParam(required = false) String startAt,
                                     @RequestParam(required = false) String endAt,
                                     @RequestParam(defaultValue = "1") int page,
@@ -155,13 +153,7 @@ public class AdminController {
         int pageSize = Math.min(100, Math.max(1, size));
         PageHelper.startPage(pageNum, pageSize);
         List<CallLog> rows = callLogMapper.selectList(keyId, parseStart(startAt), parseEnd(endAt));
-        PageInfo<CallLog> result = new PageInfo<>(rows);
-        Map<String, Object> m = new LinkedHashMap<>();
-        m.put("content", rows);
-        m.put("total", result.getTotal());
-        m.put("page", page);
-        m.put("size", pageSize);
-        return m;
+        return new PageResult<>(rows, new PageInfo<>(rows).getTotal(), page, pageSize);
     }
 
     @GetMapping("/api/admin/logs/export")
@@ -203,23 +195,17 @@ public class AdminController {
     // ---------- audit logs ----------
 
     @GetMapping("/api/admin/audit-logs")
-    public Map<String, Object> auditLogs(@RequestParam(defaultValue = "1") int page,
-                                         @RequestParam(defaultValue = "50") int size,
-                                         @RequestParam(required = false) String username,
-                                         @RequestParam(required = false) String action,
-                                         @RequestParam(required = false) String startAt,
-                                         @RequestParam(required = false) String endAt) {
+    public PageResult<AuditLog> auditLogs(@RequestParam(defaultValue = "1") int page,
+                                          @RequestParam(defaultValue = "50") int size,
+                                          @RequestParam(required = false) String username,
+                                          @RequestParam(required = false) String action,
+                                          @RequestParam(required = false) String startAt,
+                                          @RequestParam(required = false) String endAt) {
         int pageNum = Math.max(1, page);
         int pageSize = Math.min(100, Math.max(1, size));
         PageHelper.startPage(pageNum, pageSize);
         List<AuditLog> rows = auditLogMapper.selectList(username, action, parseStart(startAt), parseEnd(endAt));
-        PageInfo<AuditLog> result = new PageInfo<>(rows);
-        Map<String, Object> m = new LinkedHashMap<>();
-        m.put("content", rows);
-        m.put("total", result.getTotal());
-        m.put("page", page);
-        m.put("size", pageSize);
-        return m;
+        return new PageResult<>(rows, new PageInfo<>(rows).getTotal(), page, pageSize);
     }
 
     // ---------- helpers ----------

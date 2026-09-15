@@ -1,6 +1,7 @@
 package com.llama.hub.service;
 
 import lombok.extern.slf4j.Slf4j;
+import com.llama.hub.model.UpstreamStatusInfo;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -8,8 +9,6 @@ import org.springframework.web.reactive.function.client.WebClient;
 
 import jakarta.annotation.PostConstruct;
 import java.time.Duration;
-import java.util.LinkedHashMap;
-import java.util.Map;
 
 @Service
 @Slf4j
@@ -59,11 +58,11 @@ public class UpstreamHealthService {
         }
     }
 
-    public Map<String, Object> status() {
-        Map<String, Object> m = new LinkedHashMap<>();
-        m.put("up", up);
-        m.put("latencyMs", latencyMs);
-        m.put("lastCheckedAt", lastCheckAt == 0 ? null : lastCheckAt);
+    public UpstreamStatusInfo status() {
+        UpstreamStatusInfo m = new UpstreamStatusInfo();
+        m.setUp(up);
+        m.setLatencyMs(latencyMs);
+        m.setLastCheckedAt(lastCheckAt == 0 ? null : lastCheckAt);
         return m;
     }
 

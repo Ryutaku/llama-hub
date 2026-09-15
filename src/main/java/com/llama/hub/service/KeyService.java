@@ -4,6 +4,8 @@ import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import com.llama.hub.mapper.ApiKeyMapper;
 import com.llama.hub.model.ApiKey;
+import com.llama.hub.model.KeyCreateResult;
+import com.llama.hub.model.KeyInfo;
 import com.llama.hub.util.ApiKeyUtil;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -16,9 +18,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
@@ -70,8 +70,8 @@ public class KeyService {
     }
 
     @Transactional
-    public Map<String, Object> create(String name, int number, String unit,
-                                      Long tokenQuota, Long requestQuota) {
+    public KeyCreateResult create(String name, int number, String unit,
+                                  Long tokenQuota, Long requestQuota) {
         String plain = ApiKeyUtil.generate();
         ApiKey key = new ApiKey();
         key.setName(name);
@@ -88,15 +88,15 @@ public class KeyService {
         key.setHitCount(0L);
         apiKeyMapper.insert(key);
 
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("key", plain);
-        result.put("keyInfo", toDto(key));
+        KeyCreateResult result = new KeyCreateResult();
+        result.setKey(plain);
+        result.setKeyInfo(toInfo(key));
         return result;
     }
 
     @Transactional
-    public Map<String, Object> update(Long id, Integer number, String unit,
-                                      Boolean isActive, Long tokenQuota, Long requestQuota) {
+    public KeyInfo update(Long id, Integer number, String unit,
+                          Boolean isActive, Long tokenQuota, Long requestQuota) {
         ApiKey key = apiKeyMapper.findById(id);
         if (key == null) {
             throw new IllegalArgumentException("key not found");
@@ -114,7 +114,7 @@ public class KeyService {
             key.setRequestQuota(validateQuota(requestQuota));
         }
         apiKeyMapper.update(key);
-        return toDto(key);
+        return toInfo(key);
     }
 
     @Transactional
@@ -135,10 +135,10 @@ public class KeyService {
         return ApiKeyUtil.decryptKey(key.getKeyPlain(), encryptionKey);
     }
 
-    public List<Map<String, Object>> list() {
+    public List<KeyInfo> list() {
         return apiKeyMapper.findAll().stream()
                 .sorted((a, b) -> b.getCreatedAt().compareTo(a.getCreatedAt()))
-                .map(this::toDto)
+                .map(this::toInfo)
                 .collect(Collectors.toList());
     }
 
@@ -182,27 +182,27 @@ public class KeyService {
         return quota;
     }
 
-    public Map<String, Object> toDto(ApiKey k) {
-        Map<String, Object> m = new LinkedHashMap<>();
-        m.put("id", k.getId());
-        m.put("name", k.getName());
-        m.put("keyPrefix", k.getKeyPrefix());
-        m.put("expiresAt", k.getExpiresAt());
-        m.put("tokenQuota", k.getTokenQuota());
-        m.put("requestQuota", k.getRequestQuota());
-        m.put("tokensUsed", k.getTokensUsed());
-        m.put("requestsUsed", k.getRequestsUsed());
-        m.put("isActive", k.getIsActive());
-        m.put("createdAt", k.getCreatedAt());
-        m.put("lastUsedAt", k.getLastUsedAt());
-        m.put("hitCount", k.getHitCount());
-        m.put("status", statusOf(k));
-        m.put("tokenUsedPct", pct(k.getTokensUsed(), k.getTokenQuota()));
-        m.put("requestUsedPct", pct(k.getRequestsUsed(), k.getRequestQuota()));
+    public KeyInfo toInfo(ApiKey k) {
+        KeyInfo m = new KeyInfo();
+        m.setId(k.getId());
+        m.setName(k.getName());
+        m.setKeyPrefix(k.getKeyPrefix());
+        m.setExpiresAt(k.getExpiresAt());
+        m.setTokenQuota(k.getTokenQuota());
+        m.setRequestQuota(k.getRequestQuota());
+        m.setTokensUsed(k.getTokensUsed());
+        m.setRequestsUsed(k.getRequestsUsed());
+        m.setIsActive(k.getIsActive());
+        m.setCreatedAt(k.getCreatedAt());
+        m.setLastUsedAt(k.getLastUsedAt());
+        m.setHitCount(k.getHitCount());
+        m.setStatus(statusOf(k));
+        m.setTokenUsedPct(pct(k.getTokensUsed(), k.getTokenQuota()));
+        m.setRequestUsedPct(pct(k.getRequestsUsed(), k.getRequestQuota()));
         return m;
     }
 
-    private Object pct(Long used, Long quota) {
+    private Double pct(Long used, Long quota) {
         if (quota == null || quota <= 0) {
             return null;
         }

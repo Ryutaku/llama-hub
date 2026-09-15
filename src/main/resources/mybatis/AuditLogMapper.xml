@@ -17,8 +17,8 @@
         <where>
             <if test="username != null and username != ''">AND username = #{username}</if>
             <if test="action != null and action != ''">AND action = #{action}</if>
-            <if test="startAt != null">AND created_at &gt;= #{startAt}</if>
-            <if test="endAt != null">AND created_at &lt; #{endAt}</if>
+            <if test="startAt != null">AND created_at >= #{startAt}</if>
+            <if test="endAt != null">AND created_at <![CDATA[<]]> #{endAt}</if>
         </where>
         ORDER BY created_at DESC
     </select>
@@ -29,13 +29,13 @@
         <where>
             <if test="username != null and username != ''">AND username = #{username}</if>
             <if test="action != null and action != ''">AND action = #{action}</if>
-            <if test="startAt != null">AND created_at &gt;= #{startAt}</if>
-            <if test="endAt != null">AND created_at &lt; #{endAt}</if>
+            <if test="startAt != null">AND created_at >= #{startAt}</if>
+            <if test="endAt != null">AND created_at <![CDATA[<]]> #{endAt}</if>
         </where>
     </select>
 
     <delete id="deleteOlderThan">
-        DELETE FROM audit_log WHERE created_at &lt; #{cutoff}
+        DELETE FROM audit_log WHERE created_at <![CDATA[<]]> #{cutoff}
     </delete>
 
 </mapper>

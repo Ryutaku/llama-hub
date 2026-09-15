@@ -24,8 +24,8 @@
         FROM call_log
         <where>
             <if test="keyId != null">AND key_id = #{keyId}</if>
-            <if test="startAt != null">AND started_at &gt;= #{startAt}</if>
-            <if test="endAt != null">AND started_at &lt; #{endAt}</if>
+            <if test="startAt != null">AND started_at >= #{startAt}</if>
+            <if test="endAt != null">AND started_at <![CDATA[<]]> #{endAt}</if>
         </where>
         ORDER BY started_at DESC
     </select>
@@ -35,13 +35,13 @@
         FROM call_log
         <where>
             <if test="keyId != null">AND key_id = #{keyId}</if>
-            <if test="startAt != null">AND started_at &gt;= #{startAt}</if>
-            <if test="endAt != null">AND started_at &lt; #{endAt}</if>
+            <if test="startAt != null">AND started_at >= #{startAt}</if>
+            <if test="endAt != null">AND started_at <![CDATA[<]]> #{endAt}</if>
         </where>
     </select>
 
     <delete id="deleteOlderThan">
-        DELETE FROM call_log WHERE started_at &lt; #{cutoff}
+        DELETE FROM call_log WHERE started_at <![CDATA[<]]> #{cutoff}
     </delete>
 
 </mapper>
