@@ -1,5 +1,6 @@
 package com.llama.hub.service;
 
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import com.llama.hub.mapper.ApiKeyMapper;
 import com.llama.hub.model.ApiKey;
@@ -8,8 +9,12 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -23,12 +28,45 @@ public class KeyService {
 
     private final ApiKeyMapper apiKeyMapper;
 
-    /** 加密钥（AES），用于存储可重看的明文副本；可通过环境变量覆盖 */
-    @Value("${gateway.key.encryption-key:llm-gateway-default}")
-    private String encryptionKey;
+    /** 配置项原始值；为空时启动期自动生成随机密钥并持久化，代码中不留任何默认值 */
+    @Value("${gateway.key.encryption-key:}")
+    private String configuredEncryptionKey;
+
+    private volatile String encryptionKey;
 
     public KeyService(ApiKeyMapper apiKeyMapper) {
         this.apiKeyMapper = apiKeyMapper;
+    }
+
+    @PostConstruct
+    void initEncryptionKey() {
+        if (configuredEncryptionKey != null && !configuredEncryptionKey.isBlank()) {
+            this.encryptionKey = configuredEncryptionKey.trim();
+            return;
+        }
+        Path path = Path.of("data", "enc.key");
+        try {
+            if (Files.exists(path)) {
+                this.encryptionKey = Files.readString(path).trim();
+            } else {
+                this.encryptionKey = randomSecret();
+                Files.createDirectories(path.getParent());
+                Files.writeString(path, this.encryptionKey);
+                log.warn("gateway.key.encryption-key 未配置，已生成随机密钥并持久化到 {}", path.toAbsolutePath());
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("初始化密钥加密钥失败", e);
+        }
+    }
+
+    private static String randomSecret() {
+        byte[] bytes = new byte[32];
+        new SecureRandom().nextBytes(bytes);
+        StringBuilder sb = new StringBuilder(bytes.length * 2);
+        for (byte b : bytes) {
+            sb.append(String.format("%02x", b));
+        }
+        return sb.toString();
     }
 
     @Transactional

@@ -74,8 +74,11 @@ public final class ApiKeyUtil {
     }
 
     private static byte[] sha256(String secret) throws NoSuchAlgorithmException {
+        if (secret == null || secret.isEmpty()) {
+            throw new IllegalArgumentException("encryption secret must not be null or empty");
+        }
         byte[] digest = MessageDigest.getInstance("SHA-256")
-                .digest((secret == null ? "llm-gateway-default" : secret).getBytes(StandardCharsets.UTF_8));
+                .digest(secret.getBytes(StandardCharsets.UTF_8));
         return Arrays.copyOf(digest, 16);
     }
 }

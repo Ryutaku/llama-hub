@@ -176,6 +176,9 @@ public class ModelStatusService {
         this.lastEnviron = newEnv;
 
         if (target != prev) {
+            // 覆盖前重读当前状态：若探测期间 markTransition 已把状态置为 target
+            // （探测开头的 prev 是旧值），则保留其设置的超时 deadline，避免清零导致超时机制失效
+            State current = state;
             this.state = target;
             lastChangeAt.set(System.currentTimeMillis());
             if (target == State.RUNNING && prev != State.RUNNING) {
@@ -184,7 +187,10 @@ public class ModelStatusService {
             if (target == State.STOPPED || target == State.STOPPING) {
                 uptimeStartAt.set(0);
             }
-            transitionDeadline = 0;
+            boolean markedByOps = (target == State.STARTING || target == State.STOPPING) && current == target;
+            if (!markedByOps) {
+                transitionDeadline = 0;
+            }
             message = null;
             log.info("model state: {} -> {}", prev, target);
             emitEvent();

@@ -40,9 +40,11 @@ import tools.jackson.databind.node.ObjectNode;
 public class ProxyService {
 
 
+    // authorization 必须剥离：网关 API Key 只用于网关鉴权，不得透传给上游模型服务器
     private static final Set<String> HOP_HEADERS = new HashSet<>(Arrays.asList(
             "host", "content-length", "connection", "accept-encoding",
-            "transfer-encoding", "upgrade", "keep-alive", "te", "trailer", "proxy-connection"));
+            "transfer-encoding", "upgrade", "keep-alive", "te", "trailer", "proxy-connection",
+            "authorization"));
 
     private final WebClient webClient;
     private final ObjectMapper objectMapper;
@@ -257,13 +259,8 @@ public class ProxyService {
             }
             callLogMapper.insert(callLog);
 
-            apiKey.setHitCount(apiKey.getHitCount() + 1);
-            apiKey.setLastUsedAt(now);
-            apiKey.setRequestsUsed(apiKey.getRequestsUsed() + 1);
-            if (usage != null && usage.total != null && usage.total > 0) {
-                apiKey.setTokensUsed(apiKey.getTokensUsed() + usage.total);
-            }
-            apiKeyMapper.update(apiKey);
+            long tokensDelta = (usage != null && usage.total != null && usage.total > 0) ? usage.total : 0L;
+            apiKeyMapper.incrementUsage(apiKey.getId(), tokensDelta, now);
         } catch (Exception e) {
             log.error("Failed to record call log for request {}", requestId, e);
         }

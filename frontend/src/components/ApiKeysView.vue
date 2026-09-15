@@ -121,8 +121,9 @@ async function doEdit() {
     load()
   } catch (e) {
     toast(e.message, 'error')
+  } finally {
+    busy.value = false
   }
-  busy.value = false
 }
 
 async function toggleActive(k) {

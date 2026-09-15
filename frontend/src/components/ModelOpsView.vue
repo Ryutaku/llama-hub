@@ -499,7 +499,7 @@ onUnmounted(() => {
                 <td class="px-3 py-1.5 text-xs text-gh-muted">{{ d.kind === 'env' ? '环境变量' : '启动参数' }}</td>
                 <td class="px-3 py-1.5 font-mono text-xs">{{ d.flag }}</td>
                 <td class="px-3 py-1.5 font-mono text-xs text-gh-muted">{{ d.old ?? '—' }}</td>
-                <td class="px-3 py-1.5 font-mono text-xs">{{ d.new ?? '—' }}</td>
+                <td class="px-3 py-1.5 font-mono text-xs">{{ d.newVal ?? '—' }}</td>
               </tr>
             </tbody>
           </table>
@@ -578,7 +578,7 @@ onUnmounted(() => {
                   <td class="px-3 py-1.5 text-xs text-gh-muted">{{ d.kind === 'env' ? '环境变量' : '启动参数' }}</td>
                   <td class="px-3 py-1.5 font-mono text-xs">{{ d.flag }}</td>
                   <td class="px-3 py-1.5 font-mono text-xs text-gh-muted">{{ d.old ?? '—' }}</td>
-                  <td class="px-3 py-1.5 font-mono text-xs">{{ d.new ?? '—' }}</td>
+                  <td class="px-3 py-1.5 font-mono text-xs">{{ d.newVal ?? '—' }}</td>
                 </tr>
               </tbody>
             </table>

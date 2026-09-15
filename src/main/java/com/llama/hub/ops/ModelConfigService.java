@@ -357,7 +357,7 @@ public class ModelConfigService {
         d.setKind("env");
         d.setFlag(key);
         d.setOld(oldValue);
-        d.setNew(newValue);
+        d.setNewVal(newValue);
         return d;
     }
 
@@ -442,7 +442,7 @@ public class ModelConfigService {
                 DiffItem d = new DiffItem();
                 d.setFlag(e.getKey());
                 d.setOld(ov);
-                d.setNew(e.getValue());
+                d.setNewVal(e.getValue());
                 diff.add(d);
             }
         }
@@ -451,7 +451,7 @@ public class ModelConfigService {
                 DiffItem d = new DiffItem();
                 d.setFlag(k);
                 d.setOld(o.get(k));
-                d.setNew(null);
+                d.setNewVal(null);
                 diff.add(d);
             }
         }
