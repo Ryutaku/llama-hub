@@ -35,7 +35,9 @@
     </select>
 
     <delete id="deleteOlderThan">
-        DELETE FROM audit_log WHERE created_at <![CDATA[<]]> #{cutoff}
+        <![CDATA[
+        DELETE FROM audit_log WHERE created_at < #{cutoff}
+        ]]>
     </delete>
 
 </mapper>

@@ -86,7 +86,8 @@
             </resource>
         </resources>
         <plugins>
-            <!-- 打 JAR：只装 class，资源文件全部排除（配置和依赖外置分开部署） -->
+            <!-- 打 JAR：装 class + mapper XML（mybatis/*.xml 随 class 进 jar，
+                 配置和静态资源外置分开部署） -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-jar-plugin</artifactId>
@@ -94,11 +95,9 @@
                     <excludes>
                         <exclude>static/**</exclude>
                         <exclude>templates/**</exclude>
-                        <exclude>mybatis/**</exclude>
                         <exclude>*.properties</exclude>
                         <exclude>*.yml</exclude>
                         <exclude>*.yaml</exclude>
-                        <exclude>*.xml</exclude>
                     </excludes>
                     <archive>
                         <manifest>
@@ -133,7 +132,8 @@
                     </execution>
                 </executions>
             </plugin>
-            <!-- 复制资源文件（application.yml + static/）到 target/resources/，部署为服务器外置 resources/ 目录 -->
+            <!-- 复制资源文件（application.yml + static/）到 target/resources/，部署为服务器外置 resources/ 目录；
+                 mapper XML 已进 jar，不再外置 -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-resources-plugin</artifactId>
@@ -151,6 +151,9 @@
                                     <includes>
                                         <include>**/*.*</include>
                                     </includes>
+                                    <excludes>
+                                        <exclude>mybatis/**</exclude>
+                                    </excludes>
                                 </resource>
                             </resources>
                             <outputDirectory>${project.build.directory}/resources</outputDirectory>

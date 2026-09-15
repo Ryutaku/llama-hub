@@ -41,7 +41,9 @@
     </select>
 
     <delete id="deleteOlderThan">
-        DELETE FROM call_log WHERE started_at <![CDATA[<]]> #{cutoff}
+        <![CDATA[
+        DELETE FROM call_log WHERE started_at < #{cutoff}
+        ]]>
     </delete>
 
 </mapper>
