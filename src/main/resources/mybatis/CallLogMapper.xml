@@ -46,4 +46,9 @@
         ]]>
     </delete>
 
+    <!-- Key 改名后同步历史日志里的名称快照，避免日志列表与导出仍显示旧名 -->
+    <update id="updateKeyName">
+        UPDATE call_log SET key_name = #{name} WHERE key_id = #{keyId}
+    </update>
+
 </mapper>

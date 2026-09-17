@@ -3,9 +3,11 @@ package com.llama.hub.service;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import com.llama.hub.mapper.ApiKeyMapper;
+import com.llama.hub.mapper.CallLogMapper;
 import com.llama.hub.model.ApiKey;
 import com.llama.hub.model.KeyCreateResult;
 import com.llama.hub.model.KeyInfo;
+import com.llama.hub.model.KeyUpdateCommand;
 import com.llama.hub.util.ApiKeyUtil;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -27,6 +29,7 @@ public class KeyService {
 
 
     private final ApiKeyMapper apiKeyMapper;
+    private final CallLogMapper callLogMapper;
 
     /** 配置项原始值；为空时启动期自动生成随机密钥并持久化，代码中不留任何默认值 */
     @Value("${gateway.key.encryption-key:}")
@@ -34,8 +37,9 @@ public class KeyService {
 
     private volatile String encryptionKey;
 
-    public KeyService(ApiKeyMapper apiKeyMapper) {
+    public KeyService(ApiKeyMapper apiKeyMapper, CallLogMapper callLogMapper) {
         this.apiKeyMapper = apiKeyMapper;
+        this.callLogMapper = callLogMapper;
     }
 
     @PostConstruct
@@ -95,23 +99,26 @@ public class KeyService {
     }
 
     @Transactional
-    public KeyInfo update(Long id, Integer number, String unit,
-                          Boolean isActive, Long tokenQuota, Long requestQuota) {
-        ApiKey key = apiKeyMapper.findById(id);
+    public KeyInfo update(KeyUpdateCommand cmd) {
+        ApiKey key = apiKeyMapper.findById(cmd.getId());
         if (key == null) {
             throw new IllegalArgumentException("key not found");
         }
-        if (unit != null) {
-            key.setExpiresAt(expireFrom(number == null ? 0 : number, unit, LocalDateTime.now()));
+        if (cmd.isNameChanged()) {
+            key.setName(cmd.getName());
+            callLogMapper.updateKeyName(key.getId(), cmd.getName());
         }
-        if (isActive != null) {
-            key.setIsActive(isActive);
+        if (cmd.isExpiryChanged()) {
+            key.setExpiresAt(cmd.getExpiresAt());
         }
-        if (tokenQuota != null) {
-            key.setTokenQuota(validateQuota(tokenQuota));
+        if (cmd.isActiveChanged()) {
+            key.setIsActive(cmd.getActive());
         }
-        if (requestQuota != null) {
-            key.setRequestQuota(validateQuota(requestQuota));
+        if (cmd.isTokenQuotaChanged()) {
+            key.setTokenQuota(validateQuota(cmd.getTokenQuota()));
+        }
+        if (cmd.isRequestQuotaChanged()) {
+            key.setRequestQuota(validateQuota(cmd.getRequestQuota()));
         }
         apiKeyMapper.update(key);
         return toInfo(key);

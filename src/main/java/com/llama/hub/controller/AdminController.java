@@ -10,6 +10,7 @@ import com.llama.hub.model.CallLog;
 import com.llama.hub.model.DashboardInfo;
 import com.llama.hub.model.KeyCreateResult;
 import com.llama.hub.model.KeyInfo;
+import com.llama.hub.model.KeyUpdateCommand;
 import com.llama.hub.model.PageResult;
 import com.llama.hub.model.RevealResult;
 import com.llama.hub.model.UpstreamStatusInfo;
@@ -27,6 +28,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -104,26 +106,56 @@ public class AdminController {
     @PutMapping("/api/admin/keys/{id}")
     public KeyInfo updateKey(@PathVariable Long id, @RequestBody Map<String, Object> body,
                              HttpServletRequest request) {
-        Integer number = toInt(body.get("number"));
-        String unit = (String) body.get("unit");
-        Boolean isActive = toBool(body.get("isActive"));
-        Long tokenQuota = toLong(body.get("tokenQuota"));
-        Long requestQuota = toLong(body.get("requestQuota"));
-        boolean hasExpiry = unit != null && !unit.isEmpty();
-        if (hasExpiry && !"permanent".equalsIgnoreCase(unit) && (number == null || number < 1)) {
-            throw new IllegalArgumentException("非永久有效期必须提供数量");
+        KeyUpdateCommand cmd = new KeyUpdateCommand();
+        cmd.setId(id);
+        List<String> changes = new ArrayList<>();
+        if (body.containsKey("name")) {
+            String name = (String) body.get("name");
+            if (name == null || name.trim().isEmpty()) {
+                throw new IllegalArgumentException("名称不能为空");
+            }
+            cmd.setName(name.trim());
+            cmd.setNameChanged(true);
+            changes.add("name=" + name.trim());
         }
-        boolean hasQuota = body.containsKey("tokenQuota") || body.containsKey("requestQuota");
-        if ((!hasExpiry) && isActive == null && !hasQuota) {
+        if (body.containsKey("unit")) {
+            String unit = (String) body.get("unit");
+            Integer number = toInt(body.get("number"));
+            if (unit == null || unit.isEmpty()) {
+                throw new IllegalArgumentException("有效期单位不能为空");
+            }
+            if (!"permanent".equalsIgnoreCase(unit) && (number == null || number < 1)) {
+                throw new IllegalArgumentException("非永久有效期必须提供数量");
+            }
+            cmd.setExpiresAt(KeyService.expireFrom(number == null ? 0 : number, unit, LocalDateTime.now()));
+            cmd.setExpiryChanged(true);
+            changes.add("expiresAt=" + ("permanent".equalsIgnoreCase(unit) ? "permanent" : number + " " + unit));
+        }
+        if (body.containsKey("isActive")) {
+            boolean active = Boolean.TRUE.equals(toBool(body.get("isActive")));
+            cmd.setActive(active);
+            cmd.setActiveChanged(true);
+            changes.add("isActive=" + active);
+        }
+        // 显式传 null 表示「不限」，字段缺失才表示「不修改」
+        if (body.containsKey("tokenQuota")) {
+            Long quota = toLong(body.get("tokenQuota"));
+            cmd.setTokenQuota(quota);
+            cmd.setTokenQuotaChanged(true);
+            changes.add("tokenQuota=" + (quota == null ? "unlimited" : quota));
+        }
+        if (body.containsKey("requestQuota")) {
+            Long quota = toLong(body.get("requestQuota"));
+            cmd.setRequestQuota(quota);
+            cmd.setRequestQuotaChanged(true);
+            changes.add("requestQuota=" + (quota == null ? "unlimited" : quota));
+        }
+        if (!cmd.hasChanges()) {
             throw new IllegalArgumentException("没有需要更新的字段");
         }
-        Long tokenQuotaArg = hasQuota ? tokenQuota : null;
-        Long requestQuotaArg = hasQuota ? requestQuota : null;
-        KeyInfo updated = keyService.update(id,
-                hasExpiry ? number : null, hasExpiry ? unit : null, isActive,
-                hasQuota ? tokenQuotaArg : null, hasQuota ? requestQuotaArg : null);
+        KeyInfo updated = keyService.update(cmd);
         auditService.record(username(request), "KEY_UPDATE", updated.getName(),
-                "id: " + id, request.getRemoteAddr());
+                "id: " + id + "; " + String.join("; ", changes), request.getRemoteAddr());
         return updated;
     }
 

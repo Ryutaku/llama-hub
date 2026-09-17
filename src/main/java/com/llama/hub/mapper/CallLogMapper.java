@@ -21,4 +21,6 @@ public interface CallLogMapper {
                @Param("endAt") LocalDateTime endAt);
 
     int deleteOlderThan(@Param("cutoff") LocalDateTime cutoff);
+
+    int updateKeyName(@Param("keyId") Long keyId, @Param("name") String name);
 }

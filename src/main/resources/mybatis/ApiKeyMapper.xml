@@ -32,13 +32,14 @@
         ORDER BY created_at DESC
     </select>
 
-    <!-- 管理端编辑只改管理字段，不触碰用量计数器，避免与并发调用计数互相覆盖 -->
+    <!-- 管理端编辑只改管理字段，不触碰用量计数器，避免与并发调用计数互相覆盖；
+         配额列允许写 NULL（= 不限），故显式声明 jdbcType -->
     <update id="update">
         UPDATE api_key
         SET name = #{name},
             expires_at = #{expiresAt,jdbcType=TIMESTAMP},
-            token_quota = #{tokenQuota},
-            request_quota = #{requestQuota},
+            token_quota = #{tokenQuota,jdbcType=BIGINT},
+            request_quota = #{requestQuota,jdbcType=BIGINT},
             is_active = #{isActive}
         WHERE id = #{id}
     </update>

@@ -1,7 +1,7 @@
 ﻿<script setup>
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { api } from '../api'
-import { toast } from '../ui'
+import { toast, fmtTok } from '../ui'
 import AppButton from './AppButton.vue'
 
 const keys = ref([])
@@ -14,8 +14,14 @@ const showPlain = ref(false)
 const plainKey = ref('')
 
 const form = ref({ name: '', number: 30, unit: 'day', tokenQuota: '', requestQuota: '' })
-const editForm = ref({ id: null, number: '', unit: 'day', tokenQuota: '', requestQuota: '' })
+const editForm = ref({
+  id: null, name: '', expiresText: '',
+  expiryMode: 'keep', number: '', unit: 'day',
+  tokenMode: 'keep', tokenQuota: '', tokensUsed: 0, tokenQuotaCurrent: null,
+  requestMode: 'keep', requestQuota: '', requestsUsed: 0, requestQuotaCurrent: null
+})
 const busy = ref(false)
+const editOriginal = ref({ name: '', tokenQuota: null, requestQuota: null })
 
 const UNITS = [
   { value: 'minute', label: '分钟' },
@@ -25,6 +31,21 @@ const UNITS = [
   { value: 'year', label: '年' },
   { value: 'permanent', label: '永久' }
 ]
+
+const EXPIRY_MODES = [
+  { value: 'keep', label: '保持不变' },
+  { value: 'permanent', label: '永久有效' },
+  { value: 'relative', label: '重新设定' }
+]
+
+const QUOTA_MODES = [
+  { value: 'keep', label: '保持不变' },
+  { value: 'unlimited', label: '不限' },
+  { value: 'custom', label: '设定上限' }
+]
+
+/** 编辑弹窗里「永久」由分段控件承担，单位下拉不再重复提供 */
+const RELATIVE_UNITS = UNITS.filter(u => u.value !== 'permanent')
 
 async function load() {
   try {
@@ -52,10 +73,10 @@ function fmtExpiry(expiresAt) {
 }
 
 const statusInfo = computed(() => ({
-  active: { label: 'active', cls: 'text-gh-green border-gh-green/50' },
-  disabled: { label: 'disabled', cls: 'text-gh-muted border-gh-border' },
-  expired: { label: 'expired', cls: 'text-gh-red border-gh-red/50' },
-  exceeded: { label: 'exceeded', cls: 'text-gh-orange border-gh-orange/50' }
+  active: { label: '正常', cls: 'text-gh-green border-gh-green/50' },
+  disabled: { label: '已禁用', cls: 'text-gh-muted border-gh-border' },
+  expired: { label: '已过期', cls: 'text-gh-red border-gh-red/50' },
+  exceeded: { label: '已超额', cls: 'text-gh-orange border-gh-orange/50' }
 }))
 
 function openCreate() {
@@ -64,14 +85,53 @@ function openCreate() {
 }
 
 function openEdit(k) {
+  editOriginal.value = {
+    name: k.name || '',
+    tokenQuota: k.tokenQuota ?? null,
+    requestQuota: k.requestQuota ?? null
+  }
   editForm.value = {
     id: k.id,
+    name: k.name || '',
+    expiresText: fmtExpiry(k.expiresAt),
+    expiryMode: 'keep',
     number: '',
     unit: 'day',
-    tokenQuota: k.tokenQuota,
-    requestQuota: k.requestQuota
+    tokenMode: 'keep',
+    tokenQuota: k.tokenQuota == null ? '' : String(k.tokenQuota),
+    tokensUsed: k.tokensUsed,
+    requestMode: 'keep',
+    requestQuota: k.requestQuota == null ? '' : String(k.requestQuota),
+    requestsUsed: k.requestsUsed
   }
+  unitOpen.value = null
   showEdit.value = true
+}
+
+function fmtNum(v) {
+  if (v == null || v === '') return '—'
+  return Number(v).toLocaleString('en-US')
+}
+
+function quotaHint(quota, used) {
+  const head = quota == null ? '当前不限' : `当前 ${fmtNum(quota)}`
+  return `${head} · 已用 ${fmtNum(used || 0)}`
+}
+
+/** 把配额选择写进请求体：保持不变则不写，不限写 null，设定上限则校验后写数值 */
+function applyQuota(mode, raw, current, body, field, label) {
+  if (mode === 'keep') return true
+  if (mode === 'unlimited') {
+    if (current !== null) body[field] = null
+    return true
+  }
+  const n = Number(raw)
+  if (raw === '' || !Number.isInteger(n) || n < 0) {
+    toast(`${label}需为不小于 0 的整数`, 'error')
+    return false
+  }
+  if (n !== current) body[field] = n
+  return true
 }
 
 async function doCreate() {
@@ -97,31 +157,37 @@ async function doCreate() {
 }
 
 async function doEdit() {
-  busy.value = true
-  try {
-    const body = {}
-    if (editForm.value.unit === 'permanent') {
-      body.unit = 'permanent'
-    } else if (editForm.value.number !== '') {
-      body.number = Number(editForm.value.number)
-      body.unit = editForm.value.unit
-    }
-    let changed = false
-    if (editForm.value.tokenQuota !== '' && Number(editForm.value.tokenQuota) >= 0) {
-      body.tokenQuota = Number(editForm.value.tokenQuota)
-      changed = true
-    }
-    if (editForm.value.requestQuota !== '' && Number(editForm.value.requestQuota) >= 0) {
-      body.requestQuota = Number(editForm.value.requestQuota)
-      changed = true
-    }
-    if (body.unit === undefined && !changed) {
-      toast('没有需要修改的内容', 'info')
+  const f = editForm.value
+  const o = editOriginal.value
+  const name = f.name.trim()
+  if (!name) {
+    toast('名称不能为空', 'error')
+    return
+  }
+  const body = {}
+  if (name !== o.name) body.name = name
+  if (f.expiryMode === 'permanent') {
+    body.unit = 'permanent'
+  } else if (f.expiryMode === 'relative') {
+    const n = Number(f.number)
+    if (f.number === '' || !Number.isInteger(n) || n < 1) {
+      toast('有效期数量需为不小于 1 的整数', 'error')
       return
     }
-    await api.updateKey(editForm.value.id, body)
+    body.number = n
+    body.unit = f.unit
+  }
+  if (!applyQuota(f.tokenMode, f.tokenQuota, o.tokenQuota, body, 'tokenQuota', 'Tokens 上限')) return
+  if (!applyQuota(f.requestMode, f.requestQuota, o.requestQuota, body, 'requestQuota', '请求上限')) return
+  if (Object.keys(body).length === 0) {
+    toast('没有需要修改的内容', 'info')
+    return
+  }
+  busy.value = true
+  try {
+    await api.updateKey(f.id, body)
     showEdit.value = false
-    toast('更新成功', 'success')
+    toast('保存成功', 'success')
     load()
   } catch (e) {
     toast(e.message, 'error')
@@ -199,8 +265,9 @@ onMounted(() => {
 onUnmounted(() => document.removeEventListener('mousedown', onDocMousedown))
 
 function pctText(cur, quota) {
-  if (quota == null) return '不限'
-  return `${cur}/${quota}`
+  const used = fmtTok(cur || 0)
+  if (quota == null) return `${used} · 不限`
+  return `${used} / ${fmtTok(quota)}`
 }
 function pctBar(cur, quota) {
   if (quota == null || quota <= 0) return 0
@@ -269,8 +336,8 @@ function barColor(bar) {
             <td class="px-3 py-2 text-xs text-gh-muted">{{ fmtTime(k.createdAt) }}</td>
             <td class="px-3 py-2 text-xs text-gh-muted">{{ fmtTime(k.lastUsedAt) }}</td>
             <td class="px-3 py-2 text-right whitespace-nowrap text-xs">
-              <button class="btn-link px-1 py-0.5 text-gh-blue hover:underline mr-3 transition-all duration-150 active:scale-90 active:bg-gh-tag rounded" @click="openEdit(k)"><i class="fa-solid fa-pen mr-0.5"></i>编辑</button>
-              <button class="btn-link px-1 py-0.5 text-gh-blue hover:underline mr-3 transition-all duration-150 active:scale-90 active:bg-gh-tag rounded" @click="doReveal(k)"><i class="fa-solid fa-copy mr-0.5"></i>复制</button>
+              <button class="btn-link px-1 py-0.5 text-gh-blue hover:underline mr-3 transition-all duration-150 active:scale-90 active:bg-gh-tag rounded" title="编辑名称、有效期与配额" @click="openEdit(k)"><i class="fa-solid fa-pen mr-0.5"></i>编辑</button>
+              <button class="btn-link px-1 py-0.5 text-gh-blue hover:underline mr-3 transition-all duration-150 active:scale-90 active:bg-gh-tag rounded" title="复制 Key 明文" @click="doReveal(k)"><i class="fa-solid fa-copy mr-0.5"></i>复制</button>
               <button
                 class="btn-link px-1 py-0.5 mr-3 hover:underline transition-all duration-150 active:scale-90 active:bg-gh-tag rounded"
                 :class="k.isActive ? 'text-gh-orange' : 'text-gh-green'"
@@ -308,9 +375,9 @@ function barColor(bar) {
             </div>
           </div>
         </div>
-        <label class="block text-xs text-gh-muted mb-1">Token 配额（留空 = 不限）</label>
+        <label class="block text-xs text-gh-muted mb-1">Tokens 配额（留空 = 不限）</label>
         <input v-model="form.tokenQuota" type="number" min="0" placeholder="如 1000000" class="input mb-3" />
-        <label class="block text-xs text-gh-muted mb-1">请求次数配额（留空 = 不限）</label>
+        <label class="block text-xs text-gh-muted mb-1">请求配额（留空 = 不限）</label>
         <input v-model="form.requestQuota" type="number" min="0" placeholder="如 10000" class="input mb-3" />
         <div class="flex justify-end gap-1.5">
           <AppButton variant="secondary" @click="showCreate = false">取消</AppButton>
@@ -326,30 +393,67 @@ function barColor(bar) {
       @click.self="showEdit = false">
       <div class="modal-pop panel-tech w-full max-w-md p-4">
         <h3 class="font-semibold text-base mb-3">编辑 API Key</h3>
-        <label class="block text-xs text-gh-muted mb-1">修改有效期（留空 = 不变）</label>
-        <div class="flex gap-2 mb-3">
-          <input v-if="editForm.unit !== 'permanent'" v-model="editForm.number" type="number" min="1" placeholder="数量" class="input w-24" />
-          <div class="relative flex-1">
-            <button type="button" class="input w-full flex justify-between items-center gap-2 whitespace-nowrap transition-all duration-150 active:scale-[0.98] active:border-gh-blue"
-              @mousedown.stop @click="toggleUnit('edit')">
-              <span>{{ unitLabel(editForm.unit) }}</span>
-              <i class="fa-solid fa-chevron-down text-[10px] text-gh-muted"></i>
-            </button>
-            <div v-if="unitOpen === 'edit'"
-              class="absolute right-0 top-full mt-1 w-full bg-gh-panel border border-gh-border rounded-md shadow-lg z-30 py-1 max-h-48 overflow-auto">
-              <button type="button" v-for="u in UNITS" :key="u.value"
-                class="block w-full text-left px-3 py-1.5 text-xs hover:bg-gh-tag transition-colors active:bg-gh-border/60 active:scale-[0.98]"
-                :class="editForm.unit === u.value ? 'bg-gh-tag font-medium' : ''"
-                @mousedown.stop @click="selectUnit('edit', u)">{{ u.label }}</button>
+
+        <label class="block text-xs text-gh-muted mb-1">名称</label>
+        <input v-model="editForm.name" placeholder="如：vscode-claude" class="input mb-3" />
+
+        <div class="flex items-baseline justify-between mb-1 gap-2">
+          <label class="text-xs text-gh-muted">有效期</label>
+          <span class="text-[11px] text-gh-muted">当前：{{ editForm.expiresText }}</span>
+        </div>
+        <div class="seg mb-2">
+          <button type="button" v-for="m in EXPIRY_MODES" :key="m.value" class="seg-item"
+            :class="editForm.expiryMode === m.value ? 'seg-active' : ''"
+            @click="editForm.expiryMode = m.value">{{ m.label }}</button>
+        </div>
+        <template v-if="editForm.expiryMode === 'relative'">
+          <div class="flex gap-2 mb-1">
+            <input v-model="editForm.number" type="number" min="1" placeholder="数量" class="input w-24" />
+            <div class="relative flex-1">
+              <button type="button" class="input w-full flex justify-between items-center gap-2 whitespace-nowrap transition-all duration-150 active:scale-[0.98] active:border-gh-blue"
+                @mousedown.stop @click="toggleUnit('edit')">
+                <span>{{ unitLabel(editForm.unit) }}</span>
+                <i class="fa-solid fa-chevron-down text-[10px] text-gh-muted"></i>
+              </button>
+              <div v-if="unitOpen === 'edit'"
+                class="absolute right-0 top-full mt-1 w-full bg-gh-panel border border-gh-border rounded-md shadow-lg z-30 py-1 max-h-48 overflow-auto">
+                <button type="button" v-for="u in RELATIVE_UNITS" :key="u.value"
+                  class="block w-full text-left px-3 py-1.5 text-xs hover:bg-gh-tag transition-colors active:bg-gh-border/60 active:scale-[0.98]"
+                  :class="editForm.unit === u.value ? 'bg-gh-tag font-medium' : ''"
+                  @mousedown.stop @click="selectUnit('edit', u)">{{ u.label }}</button>
+              </div>
             </div>
           </div>
+          <p class="text-[11px] text-gh-muted mb-3">到期时间自保存时刻重新计算</p>
+        </template>
+        <div v-else class="mb-3"></div>
+
+        <div class="flex items-baseline justify-between mb-1 gap-2">
+          <label class="text-xs text-gh-muted">Tokens 配额</label>
+          <span class="text-[11px] text-gh-muted font-mono">{{ quotaHint(editOriginal.tokenQuota, editForm.tokensUsed) }}</span>
         </div>
-        <label class="block text-xs text-gh-muted mb-1">Token 配额（留空 = 不变）</label>
-        <input v-model="editForm.tokenQuota" type="number" min="0" placeholder="当前值见表格"
-          class="input mb-3" />
-        <label class="block text-xs text-gh-muted mb-1">请求次数配额（留空 = 不变）</label>
-        <input v-model="editForm.requestQuota" type="number" min="0" placeholder="当前值见表格"
-          class="input mb-3" />
+        <div class="seg mb-2">
+          <button type="button" v-for="m in QUOTA_MODES" :key="m.value" class="seg-item"
+            :class="editForm.tokenMode === m.value ? 'seg-active' : ''"
+            @click="editForm.tokenMode = m.value">{{ m.label }}</button>
+        </div>
+        <input v-if="editForm.tokenMode === 'custom'" v-model="editForm.tokenQuota" type="number" min="0"
+          placeholder="如 1000000" class="input mb-3" />
+        <div v-else class="mb-3"></div>
+
+        <div class="flex items-baseline justify-between mb-1 gap-2">
+          <label class="text-xs text-gh-muted">请求配额</label>
+          <span class="text-[11px] text-gh-muted font-mono">{{ quotaHint(editOriginal.requestQuota, editForm.requestsUsed) }}</span>
+        </div>
+        <div class="seg mb-2">
+          <button type="button" v-for="m in QUOTA_MODES" :key="m.value" class="seg-item"
+            :class="editForm.requestMode === m.value ? 'seg-active' : ''"
+            @click="editForm.requestMode = m.value">{{ m.label }}</button>
+        </div>
+        <input v-if="editForm.requestMode === 'custom'" v-model="editForm.requestQuota" type="number" min="0"
+          placeholder="如 10000" class="input mb-3" />
+        <div v-else class="mb-3"></div>
+
         <div class="flex justify-end gap-1.5">
           <AppButton variant="secondary" @click="showEdit = false">取消</AppButton>
           <AppButton
@@ -406,5 +510,30 @@ function barColor(bar) {
   -webkit-appearance: none;
   appearance: none;
   margin: 0;
+}
+.seg {
+  display: flex;
+  gap: 4px;
+}
+.seg-item {
+  flex: 1;
+  padding: 5px 8px;
+  font-size: 12px;
+  text-align: center;
+  color: var(--color-gh-muted);
+  background: #0a111d;
+  border: 1px solid var(--color-gh-border);
+  border-radius: 6px;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.seg-item:hover {
+  color: var(--color-gh-text);
+  border-color: var(--color-gh-muted);
+}
+.seg-active,
+.seg-active:hover {
+  color: #22d3ee;
+  border-color: #22d3ee;
+  background: rgba(34, 211, 238, 0.08);
 }
 </style>
