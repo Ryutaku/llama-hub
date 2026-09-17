@@ -88,10 +88,13 @@ public class AdminController {
         }
         Integer number = toInt(body.get("number"));
         String unit = (String) body.get("unit");
-        if (number == null || number < 1 || unit == null || unit.isEmpty()) {
+        if (unit == null || unit.isEmpty()) {
             throw new IllegalArgumentException("有效期不能为空");
         }
-        KeyCreateResult created = keyService.create(name.trim(), number, unit,
+        if (!"permanent".equalsIgnoreCase(unit) && (number == null || number < 1)) {
+            throw new IllegalArgumentException("非永久有效期必须提供数量");
+        }
+        KeyCreateResult created = keyService.create(name.trim(), number == null ? 0 : number, unit,
                 toLong(body.get("tokenQuota")), toLong(body.get("requestQuota")));
         auditService.record(username(request), "KEY_CREATE", name,
                 "expires: " + number + " " + unit, request.getRemoteAddr());
@@ -106,7 +109,10 @@ public class AdminController {
         Boolean isActive = toBool(body.get("isActive"));
         Long tokenQuota = toLong(body.get("tokenQuota"));
         Long requestQuota = toLong(body.get("requestQuota"));
-        boolean hasExpiry = number != null && unit != null;
+        boolean hasExpiry = unit != null && !unit.isEmpty();
+        if (hasExpiry && !"permanent".equalsIgnoreCase(unit) && (number == null || number < 1)) {
+            throw new IllegalArgumentException("非永久有效期必须提供数量");
+        }
         boolean hasQuota = body.containsKey("tokenQuota") || body.containsKey("requestQuota");
         if ((!hasExpiry) && isActive == null && !hasQuota) {
             throw new IllegalArgumentException("没有需要更新的字段");
@@ -134,11 +140,19 @@ public class AdminController {
     public RevealResult revealKey(@PathVariable Long id, HttpServletRequest request) {
         String plain = keyService.reveal(id);
         if (plain == null) {
-            throw new IllegalArgumentException("该 Key 未保存明文副本，无法找回（旧密钥可删除重建）");
+            throw new IllegalArgumentException("该 Key 未保存明文副本，无法找回（旧密钥可补录明文或删除重建）");
         }
         auditService.record(username(request), "KEY_REVEAL",
                 String.valueOf(id), "key revealed", request.getRemoteAddr());
         return new RevealResult(plain);
+    }
+
+    @PostMapping("/api/admin/keys/recover-plain")
+    public KeyInfo recoverPlain(@RequestBody Map<String, Object> body, HttpServletRequest request) {
+        KeyInfo info = keyService.backfillPlain((String) body.get("plain"));
+        auditService.record(username(request), "KEY_RECOVER", info.getName(),
+                "id: " + info.getId() + " plain backfilled", request.getRemoteAddr());
+        return info;
     }
 
     // ---------- call logs ----------

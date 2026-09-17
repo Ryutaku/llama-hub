@@ -36,10 +36,17 @@
     <update id="update">
         UPDATE api_key
         SET name = #{name},
-            expires_at = #{expiresAt},
+            expires_at = #{expiresAt,jdbcType=TIMESTAMP},
             token_quota = #{tokenQuota},
             request_quota = #{requestQuota},
             is_active = #{isActive}
+        WHERE id = #{id}
+    </update>
+
+    <!-- 仅回填明文副本，不触碰其它列，避免与并发调用计数/配额更新互相覆盖 -->
+    <update id="updateKeyPlain">
+        UPDATE api_key
+        SET key_plain = #{keyPlain}
         WHERE id = #{id}
     </update>
 

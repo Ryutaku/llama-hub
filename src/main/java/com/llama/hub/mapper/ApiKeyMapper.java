@@ -19,6 +19,8 @@ public interface ApiKeyMapper {
 
     int update(ApiKey key);
 
+    int updateKeyPlain(@Param("id") Long id, @Param("keyPlain") String keyPlain);
+
     int incrementUsage(@Param("id") Long id, @Param("tokensDelta") long tokensDelta,
                        @Param("at") java.time.LocalDateTime at);
 

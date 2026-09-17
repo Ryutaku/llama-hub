@@ -100,8 +100,12 @@ async function doEdit() {
   busy.value = true
   try {
     const body = {}
-    if (editForm.value.number !== '') body.number = Number(editForm.value.number)
-    if (body.number !== undefined) body.unit = editForm.value.unit
+    if (editForm.value.unit === 'permanent') {
+      body.unit = 'permanent'
+    } else if (editForm.value.number !== '') {
+      body.number = Number(editForm.value.number)
+      body.unit = editForm.value.unit
+    }
     let changed = false
     if (editForm.value.tokenQuota !== '' && Number(editForm.value.tokenQuota) >= 0) {
       body.tokenQuota = Number(editForm.value.tokenQuota)
@@ -111,7 +115,7 @@ async function doEdit() {
       body.requestQuota = Number(editForm.value.requestQuota)
       changed = true
     }
-    if (body.number === undefined && !changed) {
+    if (body.unit === undefined && !changed) {
       toast('没有需要修改的内容', 'info')
       return
     }
@@ -392,5 +396,15 @@ function barColor(bar) {
 .input:focus {
   border-color: #22d3ee;
   box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.14);
+}
+.input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+.input[type='number']::-webkit-outer-spin-button,
+.input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
 }
 </style>

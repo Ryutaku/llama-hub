@@ -101,8 +101,8 @@ public class KeyService {
         if (key == null) {
             throw new IllegalArgumentException("key not found");
         }
-        if (number != null && unit != null) {
-            key.setExpiresAt(expireFrom(number, unit, LocalDateTime.now()));
+        if (unit != null) {
+            key.setExpiresAt(expireFrom(number == null ? 0 : number, unit, LocalDateTime.now()));
         }
         if (isActive != null) {
             key.setIsActive(isActive);
@@ -133,6 +133,24 @@ public class KeyService {
             return null;
         }
         return ApiKeyUtil.decryptKey(key.getKeyPlain(), encryptionKey);
+    }
+
+    /**
+     * 为旧 Key 回填明文副本：按 sha256(明文) 精确定位现有记录后加密写入 key_plain。
+     * 明文哈希未命中任何记录则抛 400，绝不新建、绝不改动 key_hash，故不影响客户端调用。
+     */
+    @Transactional
+    public KeyInfo backfillPlain(String plain) {
+        if (plain == null || plain.isBlank()) {
+            throw new IllegalArgumentException("明文不能为空");
+        }
+        String trimmed = plain.trim();
+        ApiKey key = apiKeyMapper.findByKeyHash(ApiKeyUtil.sha256Hex(trimmed));
+        if (key == null) {
+            throw new IllegalArgumentException("该明文不对应任何现有 Key（哈希未命中，请核对是否填错）");
+        }
+        apiKeyMapper.updateKeyPlain(key.getId(), ApiKeyUtil.encryptKey(trimmed, encryptionKey));
+        return toInfo(key);
     }
 
     public List<KeyInfo> list() {
