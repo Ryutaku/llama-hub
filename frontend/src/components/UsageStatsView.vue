@@ -1,16 +1,14 @@
 <script setup>
 import { ref } from 'vue'
-import KeyUsageView from './KeyUsageView.vue'
 import DailyUsageView from './DailyUsageView.vue'
 import MemberUsageView from './MemberUsageView.vue'
 
 const subTabs = [
-  { key: 'key', label: 'Key 用量', icon: 'fa-solid fa-key' },
-  { key: 'daily', label: '每日用量', icon: 'fa-solid fa-chart-line' },
-  { key: 'member', label: '成员用量', icon: 'fa-solid fa-users' }
+  { key: 'member', label: '成员用量', icon: 'fa-solid fa-users' },
+  { key: 'daily', label: '每日用量', icon: 'fa-solid fa-chart-line' }
 ]
 
-const sub = ref('key')
+const sub = ref('member')
 </script>
 
 <template>
@@ -27,9 +25,8 @@ const sub = ref('key')
       ><i :class="t.icon" class="mr-1.5"></i>{{ t.label }}</button>
     </div>
 
-    <KeyUsageView v-if="sub === 'key'" />
-    <DailyUsageView v-else-if="sub === 'daily'" />
-    <MemberUsageView v-else />
+    <MemberUsageView v-if="sub === 'member'" />
+    <DailyUsageView v-else />
   </div>
 </template>
 

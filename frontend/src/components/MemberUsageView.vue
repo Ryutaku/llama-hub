@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { api } from '../api'
-import { fmtTok } from '../ui'
+import { fmtTok, fmtDuration } from '../ui'
 import DatePicker from './DatePicker.vue'
 import AppButton from './AppButton.vue'
 
@@ -21,6 +21,8 @@ const error = ref('')
 
 const total = computed(() => result.value?.total || null)
 const grandTokens = computed(() => Number(result.value?.total?.totalTokens) || 0)
+const rankedErrors = computed(() =>
+  (result.value?.items || []).reduce((s, i) => s + (Number(i.errors) || 0), 0))
 
 // 成员 = API Key（Key 名称即成员名），按总 Token 降序生成排名
 const ranked = computed(() => {
@@ -55,6 +57,9 @@ function fmtInt(n) {
 function fmtPct(v) {
   return v == null ? '—' : `${v}%`
 }
+function fmtSpeed(v) {
+  return v == null ? '—' : `${v} tok/s`
+}
 function fmtShare(v) {
   return `${Number(v).toFixed(1)}%`
 }
@@ -86,7 +91,7 @@ function fmtShare(v) {
     <p v-if="error" class="text-gh-red text-sm mb-3">{{ error }}</p>
 
     <div v-if="result" class="panel-tech overflow-x-auto">
-      <table class="w-full min-w-[960px] text-sm">
+      <table class="w-full min-w-[1120px] text-sm">
         <thead>
           <tr class="border-b border-gh-border bg-gh-tag/60 text-left text-xs text-gh-muted">
             <th class="px-3 py-2">排名</th>
@@ -97,12 +102,15 @@ function fmtShare(v) {
             <th class="px-3 py-2 text-right">输出 Token</th>
             <th class="px-3 py-2 text-right">缓存 Token</th>
             <th class="px-3 py-2 text-right">命中率</th>
+            <th class="px-3 py-2 text-right">平均速度</th>
+            <th class="px-3 py-2 text-right">平均耗时</th>
+            <th class="px-3 py-2 text-right">错误数</th>
             <th class="px-3 py-2 w-48">占比</th>
           </tr>
         </thead>
         <tbody>
           <tr v-if="ranked.length === 0">
-            <td colspan="9" class="px-4 py-10 text-center text-gh-muted">暂无数据</td>
+            <td colspan="12" class="px-4 py-10 text-center text-gh-muted">暂无数据</td>
           </tr>
           <tr v-for="i in ranked" :key="i.keyId" class="border-b border-gh-border/40 hover:bg-gh-cyan/5 transition-colors">
             <td class="px-3 py-1.5 font-mono text-xs" :class="i.rank <= 3 ? 'text-gh-orange font-bold' : 'text-gh-muted'">{{ i.rank }}</td>
@@ -113,6 +121,11 @@ function fmtShare(v) {
             <td class="px-3 py-1.5 text-right font-mono text-xs">{{ fmtTok(i.completionTokens) }}</td>
             <td class="px-3 py-1.5 text-right font-mono text-xs">{{ fmtTok(i.cachedTokens) }}</td>
             <td class="px-3 py-1.5 text-right font-mono text-xs">{{ fmtPct(i.cacheHitRate) }}</td>
+            <td class="px-3 py-1.5 text-right font-mono text-xs">{{ fmtSpeed(i.avgSpeed) }}</td>
+            <td class="px-3 py-1.5 text-right font-mono text-xs">{{ fmtDuration(i.avgDuration) }}</td>
+            <td class="px-3 py-1.5 text-right font-mono text-xs" :class="Number(i.errors) > 0 ? 'text-gh-red font-semibold' : 'text-gh-muted'">
+              {{ fmtInt(i.errors) }}
+            </td>
             <td class="px-3 py-1.5">
               <div class="flex items-center gap-2">
                 <div class="flex-1 h-2 rounded-full bg-gh-border/40 overflow-hidden">
@@ -135,6 +148,11 @@ function fmtShare(v) {
             <td class="px-3 py-2 text-right font-mono text-xs">{{ fmtTok(total.completionTokens) }}</td>
             <td class="px-3 py-2 text-right font-mono text-xs">{{ fmtTok(total.cachedTokens) }}</td>
             <td class="px-3 py-2 text-right font-mono text-xs">{{ fmtPct(total.cacheHitRate) }}</td>
+            <td class="px-3 py-2 text-right font-mono text-xs">—</td>
+            <td class="px-3 py-2 text-right font-mono text-xs">—</td>
+            <td class="px-3 py-2 text-right font-mono text-xs" :class="Number(rankedErrors) > 0 ? 'text-gh-red font-semibold' : 'text-gh-muted'">
+              {{ fmtInt(rankedErrors) }}
+            </td>
             <td class="px-3 py-2 text-right font-mono text-[11px] text-gh-muted">100%</td>
           </tr>
         </tbody>
