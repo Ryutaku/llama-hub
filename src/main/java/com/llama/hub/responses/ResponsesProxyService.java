@@ -24,9 +24,11 @@ import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.Enumeration;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -72,9 +74,9 @@ public class ResponsesProxyService {
         String requestBodyStr = bodyEnabled ? truncate(new String(responsesBody, StandardCharsets.UTF_8), 2000) : null;
         String model = extractModel(responsesBody);
 
-        byte[] chatBody;
+        ResponsesAdapter.PreparedChatRequest prepared;
         try {
-            chatBody = adapter.toChatRequest(responsesBody);
+            prepared = adapter.toChatRequest(responsesBody);
         } catch (ResponsesAdapter.BadRequestException e) {
             writeError(resp, 400, e.getMessage(), "invalid_request_error");
             callRecorder.record(apiKey, requestId, endpoint, model, requestBodyStr,
@@ -90,8 +92,9 @@ public class ResponsesProxyService {
         WebClient.RequestBodySpec bodySpec = webClient.post().uri(upstream + "/v1/chat/completions")
                 .headers(h -> h.putAll(copyRequestHeaders(req)));
 
-        Mono<Void> responseMono = bodySpec.bodyValue(chatBody)
-                .exchangeToMono(cr -> handleResponse(cr, req, resp, statusRef, errorRef, usageSourceRef, responseBodyRef, model));
+        Mono<Void> responseMono = bodySpec.bodyValue(prepared.body)
+                .exchangeToMono(cr -> handleResponse(cr, resp, statusRef, errorRef, usageSourceRef, responseBodyRef,
+                        model, prepared.toolsByChatName));
 
         return responseMono
                 .onErrorResume(e -> Mono.fromRunnable(() -> {
@@ -107,16 +110,16 @@ public class ResponsesProxyService {
                 .toFuture();
     }
 
-    private Mono<Void> handleResponse(ClientResponse cr, HttpServletRequest req, HttpServletResponse resp,
+    private Mono<Void> handleResponse(ClientResponse cr, HttpServletResponse resp,
                                       AtomicReference<Integer> statusRef, AtomicReference<String> errorRef,
                                       AtomicReference<String> usageSourceRef, AtomicReference<String> responseBodyRef,
-                                      String model) {
+                                      String model, Map<String, ResponsesAdapter.ToolDescriptor> toolsByChatName) {
         int upstreamStatus = cr.statusCode().value();
         String contentType = cr.headers().contentType().map(Object::toString).orElse("");
         boolean streaming = contentType.contains("ndjson") || contentType.contains("event-stream");
 
         if (streaming) {
-            return handleStreaming(cr, resp, statusRef, errorRef, usageSourceRef, model);
+            return handleStreaming(cr, resp, statusRef, errorRef, usageSourceRef, model, toolsByChatName);
         }
 
         return cr.bodyToMono(byte[].class)
@@ -131,26 +134,24 @@ public class ResponsesProxyService {
                         errorRef.set(truncate(text, 500));
                         return text;
                     }
+                    final String converted;
                     try {
                         JsonNode chatResp = objectMapper.readTree(body);
-                        String converted = adapter.toResponsesResponse(chatResp, model).toString();
-                        resp.setStatus(200);
-                        resp.setContentType("application/json;charset=UTF-8");
-                        byte[] out = converted.getBytes(StandardCharsets.UTF_8);
-                        resp.setContentLength(out.length);
-                        resp.getOutputStream().write(out);
-                        statusRef.set(200);
-                        errorRef.set(null);
-                        usageSourceRef.set(text);
-                        responseBodyRef.set(bodyEnabled ? truncate(converted, 2000) : null);
+                        converted = adapter.toResponsesResponse(chatResp, model, toolsByChatName).toString();
                     } catch (Exception e) {
-                        // 上游 2xx 但响应不是合法 chat JSON：原样透传，避免吞掉内容
-                        resp.setStatus(upstreamStatus);
-                        copyResponseHeaders(cr, resp);
-                        writeBytes(resp, body);
-                        statusRef.set(upstreamStatus);
-                        errorRef.set(null);
+                        String message = "invalid chat response from upstream: " + describeError(e);
+                        statusRef.set(502);
+                        errorRef.set(message);
+                        writeError(resp, 502, message, "upstream_error");
+                        return text;
                     }
+                    resp.setStatus(200);
+                    resp.setContentType("application/json;charset=UTF-8");
+                    writeBytes(resp, converted.getBytes(StandardCharsets.UTF_8));
+                    statusRef.set(200);
+                    errorRef.set(null);
+                    usageSourceRef.set(text);
+                    responseBodyRef.set(bodyEnabled ? truncate(converted, 2000) : null);
                     return text;
                 })
                 .then()
@@ -165,7 +166,8 @@ public class ResponsesProxyService {
 
     private Mono<Void> handleStreaming(ClientResponse cr, HttpServletResponse resp,
                                        AtomicReference<Integer> statusRef, AtomicReference<String> errorRef,
-                                       AtomicReference<String> usageSourceRef, String model) {
+                                       AtomicReference<String> usageSourceRef, String model,
+                                       Map<String, ResponsesAdapter.ToolDescriptor> toolsByChatName) {
         int upstreamStatus = cr.statusCode().value();
         // 上游流式建连即非 2xx：读完整 body 原样透传
         if (upstreamStatus >= 400) {
@@ -186,7 +188,7 @@ public class ResponsesProxyService {
                     }));
         }
 
-        ResponsesAdapter.StreamTranslator translator = adapter.new StreamTranslator(model);
+        ResponsesAdapter.StreamTranslator translator = adapter.new StreamTranslator(model, toolsByChatName);
         resp.setStatus(200);
         resp.setContentType("text/event-stream;charset=UTF-8");
         resp.setHeader("Cache-Control", "no-cache");
@@ -206,6 +208,7 @@ public class ResponsesProxyService {
 
         final OutputStream sink = out;
         ByteArrayOutputStream pending = new ByteArrayOutputStream();
+        AtomicBoolean upstreamDone = new AtomicBoolean(false);
         return cr.bodyToFlux(byte[].class)
                 .doOnNext(chunk -> {
                     try {
@@ -221,7 +224,7 @@ public class ResponsesProxyService {
                                 if (line.endsWith("\r")) {
                                     line = line.substring(0, line.length() - 1);
                                 }
-                                collectStreamLine(line, translator, events, usageSourceRef);
+                                collectStreamLine(line, translator, events, usageSourceRef, upstreamDone);
                             }
                         }
                         if (start < data.length) {
@@ -241,13 +244,19 @@ public class ResponsesProxyService {
                         byte[] rest = pending.toByteArray();
                         if (rest.length > 0) {
                             StringBuilder events = new StringBuilder();
-                            collectStreamLine(new String(rest, StandardCharsets.UTF_8), translator, events, usageSourceRef);
+                            collectStreamLine(new String(rest, StandardCharsets.UTF_8), translator, events,
+                                    usageSourceRef, upstreamDone);
                             if (!events.isEmpty()) {
                                 sink.write(adapter.utf8(events.toString()));
                             }
                         }
-                        sink.write(adapter.utf8(translator.finish(
-                                callRecorder.parseUsage(usageSourceRef.get()))));
+                        if (!translator.isTerminal()) {
+                            String message = upstreamDone.get()
+                                    ? "upstream stream ended without a terminal response"
+                                    : "upstream stream closed before [DONE]";
+                            errorRef.set(message);
+                            sink.write(adapter.utf8(translator.failed(message)));
+                        }
                         sink.flush();
                     } catch (IOException e) {
                         if (errorRef.get() == null) {
@@ -258,7 +267,8 @@ public class ResponsesProxyService {
                 .then()
                 .onErrorResume(e -> Mono.fromRunnable(() -> {
                     String msg = describeError(e);
-                    if (errorRef.get() == null || !errorRef.get().startsWith("client disconnected")) {
+                    if ((errorRef.get() == null || !errorRef.get().startsWith("client disconnected"))
+                            && !translator.isTerminal()) {
                         errorRef.set(msg);
                         try {
                             sink.write(adapter.utf8(translator.failed(msg)));
@@ -271,13 +281,19 @@ public class ResponsesProxyService {
     }
 
     /** 处理上游 chat SSE 的一行：data 载荷转 Responses 事件；usage/timings chunk 留作记账来源 */
-    private void collectStreamLine(String line, ResponsesAdapter.StreamTranslator translator,
-                                   StringBuilder events, AtomicReference<String> usageSourceRef) {
+    void collectStreamLine(String line, ResponsesAdapter.StreamTranslator translator,
+                           StringBuilder events, AtomicReference<String> usageSourceRef,
+                           AtomicBoolean upstreamDone) {
         if (!line.startsWith("data:")) {
             return;
         }
         String payload = line.substring(5).trim();
-        if (payload.isEmpty() || "[DONE]".equals(payload)) {
+        if (payload.isEmpty()) {
+            return;
+        }
+        if ("[DONE]".equals(payload)) {
+            upstreamDone.set(true);
+            events.append(translator.finish(callRecorder.parseUsage(usageSourceRef.get())));
             return;
         }
         if (payload.contains("\"usage\"") || payload.contains("\"timings\"")) {

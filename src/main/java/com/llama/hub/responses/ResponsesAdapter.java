@@ -1,7 +1,6 @@
 package com.llama.hub.responses;
 
 import com.llama.hub.service.CallRecorder;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -16,15 +15,16 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * OpenAI Responses API <-> Chat Completions 协议适配（无状态第一期）：
- * - 请求：input/instructions/tools/tool_choice/text.format 等映射为 chat 请求；
- *   previous_response_id / background / 内置工具（web_search 等）显式拒绝
- * - 非流式响应：choices[0].message 映射为 output 数组（function_call + message item）
- * - 流式：chat chunk 流合成 Responses SSE 事件序列（response.created → output_item/content_part/delta → completed）
+ * OpenAI Responses API 与上游 Chat Completions API 之间的无状态协议适配器。
+ *
+ * <p>网关只模拟客户端侧能力：function、custom、namespace 和 client tool_search。
+ * web_search 等必须由服务端执行的内置工具无法由 llama-server 代办，因此明确返回 400，
+ * 不静默丢弃工具。</p>
  */
 @Component
-@Slf4j
 public class ResponsesAdapter {
+
+    private static final int CHAT_TOOL_NAME_MAX_LENGTH = 64;
 
     private final ObjectMapper objectMapper;
 
@@ -38,520 +38,865 @@ public class ResponsesAdapter {
         }
     }
 
-    // ---------- 请求：Responses -> Chat ----------
+    public static class UpstreamStreamException extends RuntimeException {
+        public UpstreamStreamException(String message) {
+            super(message);
+        }
+    }
 
-    public byte[] toChatRequest(byte[] responsesBody) {
-        JsonNode req;
-        try {
-            req = objectMapper.readTree(responsesBody);
-        } catch (Exception e) {
-            throw new BadRequestException("request body is not valid JSON");
+    enum ToolKind {
+        FUNCTION,
+        CUSTOM,
+        TOOL_SEARCH
+    }
+
+    record ToolDescriptor(ToolKind kind, String namespace, String name, String execution) {
+    }
+
+    /** 转换后的 chat 请求，以及把 chat 工具名还原成 Responses 工具所需的请求级索引。 */
+    public static final class PreparedChatRequest {
+        final byte[] body;
+        final Map<String, ToolDescriptor> toolsByChatName;
+
+        PreparedChatRequest(byte[] body, Map<String, ToolDescriptor> toolsByChatName) {
+            this.body = body;
+            this.toolsByChatName = Map.copyOf(toolsByChatName);
         }
-        if (!req.isObject()) {
-            throw new BadRequestException("request body must be a JSON object");
-        }
-        String model = req.path("model").asText(null);
-        if (model == null || model.isEmpty()) {
-            throw new BadRequestException("field 'model' is required");
-        }
-        if (req.has("previous_response_id") && !req.path("previous_response_id").isNull()) {
-            throw new BadRequestException("'previous_response_id' is not supported: this gateway is stateless, send the full conversation in 'input'");
-        }
-        if (req.path("background").asBoolean(false)) {
-            throw new BadRequestException("'background' mode is not supported");
-        }
+    }
+
+    /** Responses 请求转为 llama-server 的 Chat Completions 请求。 */
+    public PreparedChatRequest toChatRequest(byte[] responsesBody) {
+        JsonNode request = parseRequest(responsesBody);
+        String model = requiredText(request, "model", "field 'model' is required");
+        rejectStatefulOptions(request);
 
         ObjectNode chat = objectMapper.createObjectNode();
         chat.put("model", model);
+
+        ToolRegistry toolRegistry = new ToolRegistry();
+        mapTools(request.path("tools"), chat, toolRegistry);
+
         ArrayNode messages = chat.putArray("messages");
-
-        String instructions = req.path("instructions").asText(null);
-        if (instructions != null && !instructions.isEmpty()) {
-            ObjectNode sys = messages.addObject();
-            sys.put("role", "system");
-            sys.put("content", instructions);
+        appendSystemMessage(request, messages);
+        appendInput(request.path("input"), messages, toolRegistry);
+        if (messages.isEmpty()) {
+            throw new BadRequestException("field 'input' must contain at least one message");
         }
 
-        JsonNode input = req.path("input");
-        if (input.isTextual()) {
-            ObjectNode user = messages.addObject();
-            user.put("role", "user");
-            user.put("content", input.asText());
-        } else if (input.isArray()) {
-            for (JsonNode item : input) {
-                appendInputItem(messages, item);
-            }
+        copyNumber(chat, request, "temperature");
+        copyNumber(chat, request, "top_p");
+        if (request.path("max_output_tokens").isIntegralNumber()) {
+            chat.set("max_tokens", request.path("max_output_tokens"));
+        }
+        JsonNode stop = request.path("stop");
+        if (stop.isTextual() || stop.isArray()) {
+            chat.set("stop", stop);
+        }
+        if (request.path("parallel_tool_calls").isBoolean()) {
+            chat.set("parallel_tool_calls", request.path("parallel_tool_calls"));
         }
 
-        // 采样参数
-        copyNumber(chat, req, "temperature");
-        copyNumber(chat, req, "top_p");
-        if (req.path("max_output_tokens").isNumber()) {
-            chat.set("max_tokens", req.path("max_output_tokens"));
-        }
-        if (req.path("stop").isNumber() || req.path("stop").isArray() || req.path("stop").isTextual()) {
-            chat.set("stop", req.path("stop"));
-        }
-        if (req.path("parallel_tool_calls").isBoolean()) {
-            chat.set("parallel_tool_calls", req.path("parallel_tool_calls"));
-        }
+        mapToolChoice(request.path("tool_choice"), chat, toolRegistry);
+        mapTextFormat(request.path("text").path("format"), chat);
 
-        // tools
-        JsonNode tools = req.path("tools");
-        if (tools.isArray() && !tools.isEmpty()) {
-            ArrayNode chatTools = chat.putArray("tools");
-            for (JsonNode t : tools) {
-                String type = t.path("type").asText("function");
-                if (!"function".equals(type)) {
-                    throw new BadRequestException("tool type '" + type + "' is not supported: only custom function tools are supported by this gateway");
-                }
-                JsonNode fn = t.path("function").isObject() ? t.path("function") : t;
-                ObjectNode ct = chatTools.addObject();
-                ct.put("type", "function");
-                ObjectNode cfn = ct.putObject("function");
-                cfn.put("name", fn.path("name").asText(""));
-                if (fn.has("description")) {
-                    cfn.set("description", fn.path("description"));
-                }
-                if (fn.has("parameters")) {
-                    cfn.set("parameters", fn.path("parameters"));
-                }
-                if (fn.has("strict")) {
-                    cfn.set("strict", fn.path("strict"));
-                }
-            }
-        }
-        JsonNode toolChoice = req.path("tool_choice");
-        if (toolChoice.isTextual()) {
-            chat.set("tool_choice", toolChoice);
-        } else if (toolChoice.isObject()) {
-            String tcType = toolChoice.path("type").asText("");
-            if ("function".equals(tcType)) {
-                ObjectNode tc = chat.putObject("tool_choice");
-                tc.put("type", "function");
-                tc.putObject("function").put("name", toolChoice.path("name").asText(""));
-            } else if (!tcType.isEmpty()) {
-                throw new BadRequestException("tool_choice type '" + tcType + "' is not supported");
-            }
-        }
-
-        // text.format -> response_format
-        JsonNode format = req.path("text").path("format");
-        if (format.isObject()) {
-            String fmtType = format.path("type").asText("");
-            if ("text".equals(fmtType) || "json_object".equals(fmtType)) {
-                ObjectNode rf = chat.putObject("response_format");
-                rf.put("type", fmtType);
-            } else if ("json_schema".equals(fmtType)) {
-                ObjectNode rf = chat.putObject("response_format");
-                rf.put("type", "json_schema");
-                ObjectNode js = rf.putObject("json_schema");
-                JsonNode src = format.path("json_schema");
-                js.put("name", src.path("name").asText("response"));
-                if (src.has("schema")) {
-                    js.set("schema", src.path("schema"));
-                }
-                if (src.has("strict")) {
-                    js.set("strict", src.path("strict"));
-                }
-            }
-        }
-
-        boolean stream = req.path("stream").asBoolean(false);
-        if (stream) {
+        if (request.path("stream").asBoolean(false)) {
             chat.put("stream", true);
             chat.putObject("stream_options").put("include_usage", true);
         }
-        return objectMapper.writeValueAsBytes(chat);
+
+        return new PreparedChatRequest(objectMapper.writeValueAsBytes(chat), toolRegistry.byChatName);
     }
 
-    private void appendInputItem(ArrayNode messages, JsonNode item) {
-        String type = item.path("type").asText(item.has("role") ? "message" : "");
-        switch (type) {
-            case "message" -> {
-                String role = item.path("role").asText("user");
-                if ("developer".equals(role)) {
-                    role = "system";
-                }
-                ObjectNode msg = messages.addObject();
-                msg.put("role", role);
-                JsonNode content = item.path("content");
-                if (content.isTextual()) {
-                    msg.put("content", content.asText());
-                } else if (content.isArray()) {
-                    msg.set("content", mapContentParts(content));
-                } else {
-                    msg.put("content", "");
-                }
+    private JsonNode parseRequest(byte[] body) {
+        if (body == null || body.length == 0) {
+            throw new BadRequestException("request body is required");
+        }
+        try {
+            JsonNode request = objectMapper.readTree(body);
+            if (request == null || !request.isObject()) {
+                throw new BadRequestException("request body must be a JSON object");
             }
-            case "function_call" -> {
-                ObjectNode msg = messages.addObject();
-                msg.put("role", "assistant");
-                ArrayNode toolCalls = msg.putArray("tool_calls");
-                ObjectNode tc = toolCalls.addObject();
-                tc.put("id", item.path("call_id").asText(""));
-                tc.put("type", "function");
-                ObjectNode fn = tc.putObject("function");
-                fn.put("name", item.path("name").asText(""));
-                fn.put("arguments", item.path("arguments").asText(""));
-            }
-            case "function_call_output" -> {
-                ObjectNode msg = messages.addObject();
-                msg.put("role", "tool");
-                msg.put("tool_call_id", item.path("call_id").asText(""));
-                msg.put("content", extractText(item.path("output")));
-            }
-            case "reasoning", "item_reference" -> {
-                // 无状态适配：推理项与引用项不回传给 chat 上游
-            }
-            default -> throw new BadRequestException("unsupported input item type '" + type + "'");
+            return request;
+        } catch (BadRequestException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new BadRequestException("request body is not valid JSON");
         }
     }
 
-    /** content parts：全文本时折叠为字符串（兼容性最好），含图片则用 chat content 数组 */
-    private JsonNode mapContentParts(JsonNode parts) {
-        StringBuilder text = new StringBuilder();
-        List<JsonNode> images = new ArrayList<>();
-        for (JsonNode part : parts) {
-            String ptype = part.path("type").asText("");
-            switch (ptype) {
-                case "input_text", "output_text", "text" -> text.append(part.path("text").asText(""));
-                case "input_image" -> {
-                    String url = part.path("image_url").asText(part.path("url").asText(""));
-                    if (!url.isEmpty()) {
-                        ObjectNode img = objectMapper.createObjectNode();
-                        img.put("type", "image_url");
-                        img.putObject("image_url").put("url", url);
-                        images.add(img);
+    private void rejectStatefulOptions(JsonNode request) {
+        if (request.has("previous_response_id") && !request.path("previous_response_id").isNull()) {
+            throw new BadRequestException("'previous_response_id' is not supported: this gateway is stateless; send the full conversation in 'input'");
+        }
+        if (request.path("background").asBoolean(false)) {
+            throw new BadRequestException("'background' mode is not supported");
+        }
+        if (request.has("conversation") && !request.path("conversation").isNull()) {
+            throw new BadRequestException("'conversation' is not supported: this gateway is stateless");
+        }
+    }
+
+    private void mapTools(JsonNode tools, ObjectNode chat, ToolRegistry registry) {
+        if (tools.isMissingNode() || tools.isNull()) {
+            return;
+        }
+        if (!tools.isArray()) {
+            throw new BadRequestException("field 'tools' must be an array");
+        }
+        ArrayNode chatTools = objectMapper.createArrayNode();
+        for (JsonNode tool : tools) {
+            if (!tool.isObject()) {
+                throw new BadRequestException("each tool must be a JSON object");
+            }
+            String type = tool.path("type").asText("function");
+            switch (type) {
+                case "function" -> addFunctionTool(chatTools, tool, null, registry);
+                case "custom" -> addCustomTool(chatTools, tool, null, registry);
+                case "namespace" -> addNamespaceTools(chatTools, tool, registry);
+                case "tool_search" -> addToolSearch(chatTools, tool, registry);
+                default -> throw new BadRequestException("tool type '" + type
+                        + "' is not supported by the chat-completions upstream");
+            }
+        }
+        if (!chatTools.isEmpty()) {
+            chat.set("tools", chatTools);
+        }
+    }
+
+    private void addNamespaceTools(ArrayNode chatTools, JsonNode namespaceTool, ToolRegistry registry) {
+        String namespace = requiredText(namespaceTool, "name", "namespace tool requires a non-empty 'name'");
+        JsonNode innerTools = namespaceTool.path("tools");
+        if (!innerTools.isArray() || innerTools.isEmpty()) {
+            throw new BadRequestException("namespace tool '" + namespace + "' requires a non-empty 'tools' array");
+        }
+        for (JsonNode innerTool : innerTools) {
+            String type = innerTool.path("type").asText("function");
+            switch (type) {
+                case "function" -> addFunctionTool(chatTools, innerTool, namespace, registry);
+                case "custom" -> addCustomTool(chatTools, innerTool, namespace, registry);
+                default -> throw new BadRequestException("tool type '" + type + "' inside namespace '"
+                        + namespace + "' is not supported");
+            }
+        }
+    }
+
+    private void addFunctionTool(ArrayNode chatTools, JsonNode source, String namespace, ToolRegistry registry) {
+        JsonNode function = source.path("function").isObject() ? source.path("function") : source;
+        String name = requiredText(function, "name", "function tool requires a non-empty 'name'");
+        String chatName = registry.register(ToolKind.FUNCTION, namespace, name, null);
+
+        ObjectNode target = chatTools.addObject();
+        target.put("type", "function");
+        ObjectNode targetFunction = target.putObject("function");
+        targetFunction.put("name", chatName);
+        copyIfPresent(function, targetFunction, "description");
+        copyIfPresent(function, targetFunction, "parameters");
+        copyIfPresent(function, targetFunction, "strict");
+    }
+
+    /**
+     * Chat Completions 没有 free-form custom tool。这里用一个只有 input 字符串参数的函数承载，
+     * 返回时再还原为 custom_tool_call，避免 Codex 把 apply_patch 等工具误当普通 function。
+     */
+    private void addCustomTool(ArrayNode chatTools, JsonNode source, String namespace, ToolRegistry registry) {
+        String name = requiredText(source, "name", "custom tool requires a non-empty 'name'");
+        String chatName = registry.register(ToolKind.CUSTOM, namespace, name, null);
+
+        ObjectNode target = chatTools.addObject();
+        target.put("type", "function");
+        ObjectNode function = target.putObject("function");
+        function.put("name", chatName);
+
+        String description = source.path("description").asText("");
+        StringBuilder adaptedDescription = new StringBuilder(description);
+        if (!description.isBlank()) {
+            adaptedDescription.append("\n\n");
+        }
+        adaptedDescription.append("Pass the complete free-form tool input in the `input` string field.");
+        JsonNode format = source.path("format");
+        if (format.isObject() && "grammar".equals(format.path("type").asText())
+                && format.path("definition").isTextual()) {
+            adaptedDescription.append(" The input must follow this ")
+                    .append(format.path("syntax").asText("custom"))
+                    .append(" grammar:\n")
+                    .append(format.path("definition").asText());
+        }
+        function.put("description", adaptedDescription.toString());
+        ObjectNode parameters = function.putObject("parameters");
+        parameters.put("type", "object");
+        parameters.putObject("properties").putObject("input").put("type", "string");
+        parameters.putArray("required").add("input");
+        parameters.put("additionalProperties", false);
+    }
+
+    private void addToolSearch(ArrayNode chatTools, JsonNode source, ToolRegistry registry) {
+        String execution = source.path("execution").asText("client");
+        if (!"client".equals(execution) && !"sync".equals(execution)) {
+            throw new BadRequestException("only client-executed tool_search is supported");
+        }
+        String chatName = registry.register(ToolKind.TOOL_SEARCH, null, "tool_search", execution);
+        ObjectNode target = chatTools.addObject();
+        target.put("type", "function");
+        ObjectNode function = target.putObject("function");
+        function.put("name", chatName);
+        function.put("description", source.path("description").asText("Search for additional tools"));
+        if (source.path("parameters").isObject()) {
+            function.set("parameters", source.path("parameters"));
+        } else {
+            function.putObject("parameters").put("type", "object");
+        }
+    }
+
+    private void appendSystemMessage(JsonNode request, ArrayNode messages) {
+        List<String> parts = new ArrayList<>();
+        collectInstructionText(request.path("instructions"), parts);
+        JsonNode input = request.path("input");
+        if (input.isArray()) {
+            for (JsonNode item : input) {
+                if (isSystemMessage(item)) {
+                    String text = extractText(item.path("content"));
+                    if (!text.isBlank()) {
+                        parts.add(text);
                     }
                 }
-                default -> {
-                    // input_file 等其余 part 忽略
+            }
+        }
+        if (!parts.isEmpty()) {
+            ObjectNode system = messages.addObject();
+            system.put("role", "system");
+            system.put("content", String.join("\n\n", parts));
+        }
+    }
+
+    private void collectInstructionText(JsonNode instructions, List<String> parts) {
+        if (instructions.isTextual()) {
+            if (!instructions.asText().isBlank()) {
+                parts.add(instructions.asText());
+            }
+            return;
+        }
+        if (instructions.isArray()) {
+            for (JsonNode item : instructions) {
+                String text = item.has("content") ? extractText(item.path("content")) : extractText(item);
+                if (!text.isBlank()) {
+                    parts.add(text);
                 }
             }
         }
-        if (images.isEmpty()) {
-            return objectMapper.getNodeFactory().textNode(text.toString());
-        }
-        ArrayNode arr = objectMapper.createArrayNode();
-        if (!text.isEmpty()) {
-            arr.addObject().put("type", "text").put("text", text.toString());
-        }
-        for (JsonNode img : images) {
-            arr.add(img);
-        }
-        return arr;
     }
 
-    private String extractText(JsonNode node) {
-        if (node.isTextual()) {
-            return node.asText();
+    private void appendInput(JsonNode input, ArrayNode messages, ToolRegistry registry) {
+        if (input.isTextual()) {
+            messages.addObject().put("role", "user").put("content", input.asText());
+            return;
         }
-        if (node.isArray()) {
-            StringBuilder sb = new StringBuilder();
-            for (JsonNode part : node) {
-                if (part.isTextual()) {
-                    sb.append(part.asText());
-                } else if (part.has("text")) {
-                    sb.append(part.path("text").asText(""));
+        if (input.isMissingNode() || input.isNull()) {
+            return;
+        }
+        if (!input.isArray()) {
+            throw new BadRequestException("field 'input' must be a string or an array");
+        }
+
+        ObjectNode pendingAssistant = null;
+        for (JsonNode item : input) {
+            String type = inputItemType(item);
+            if (isSystemMessage(item) || "reasoning".equals(type) || "item_reference".equals(type)) {
+                continue;
+            }
+            if (isToolCall(type)) {
+                if (pendingAssistant == null) {
+                    pendingAssistant = objectMapper.createObjectNode();
+                    pendingAssistant.put("role", "assistant");
+                    pendingAssistant.putNull("content");
+                    pendingAssistant.putArray("tool_calls");
+                }
+                appendHistoricalToolCall(pendingAssistant.withArray("tool_calls"), item, type, registry);
+                continue;
+            }
+
+            if (pendingAssistant != null) {
+                messages.add(pendingAssistant);
+                pendingAssistant = null;
+            }
+            switch (type) {
+                case "message" -> appendMessage(messages, item);
+                case "function_call_output", "custom_tool_call_output", "tool_search_output" ->
+                        appendToolOutput(messages, item, type);
+                default -> throw new BadRequestException("unsupported input item type '" + type + "'");
+            }
+        }
+        if (pendingAssistant != null) {
+            messages.add(pendingAssistant);
+        }
+    }
+
+    private boolean isToolCall(String type) {
+        return "function_call".equals(type) || "custom_tool_call".equals(type)
+                || "tool_search_call".equals(type);
+    }
+
+    private void appendMessage(ArrayNode messages, JsonNode item) {
+        String role = item.path("role").asText("user");
+        if (!"user".equals(role) && !"assistant".equals(role)) {
+            throw new BadRequestException("message role '" + role + "' is not supported in input");
+        }
+        ObjectNode message = messages.addObject();
+        message.put("role", role);
+        JsonNode content = item.path("content");
+        if (content.isTextual()) {
+            message.put("content", content.asText());
+        } else if (content.isArray()) {
+            message.set("content", mapContentParts(content));
+        } else {
+            message.put("content", "");
+        }
+    }
+
+    private void appendHistoricalToolCall(ArrayNode toolCalls, JsonNode item, String type,
+                                          ToolRegistry registry) {
+        ToolKind kind = switch (type) {
+            case "custom_tool_call" -> ToolKind.CUSTOM;
+            case "tool_search_call" -> ToolKind.TOOL_SEARCH;
+            default -> ToolKind.FUNCTION;
+        };
+        String namespace = nullableText(item.path("namespace"));
+        String name = kind == ToolKind.TOOL_SEARCH ? "tool_search"
+                : requiredText(item, "name", type + " requires a non-empty 'name'");
+        String chatName = registry.findChatName(kind, namespace, name);
+        if (chatName == null) {
+            chatName = safeChatName(namespace, name);
+        }
+
+        ObjectNode toolCall = toolCalls.addObject();
+        toolCall.put("id", requiredText(item, "call_id", type + " requires a non-empty 'call_id'"));
+        toolCall.put("type", "function");
+        ObjectNode function = toolCall.putObject("function");
+        function.put("name", chatName);
+        if (kind == ToolKind.CUSTOM) {
+            ObjectNode arguments = objectMapper.createObjectNode();
+            arguments.put("input", item.path("input").asText(""));
+            function.put("arguments", arguments.toString());
+        } else if (kind == ToolKind.TOOL_SEARCH) {
+            JsonNode arguments = item.path("arguments");
+            function.put("arguments", arguments.isTextual() ? arguments.asText() : arguments.toString());
+        } else {
+            function.put("arguments", item.path("arguments").asText("{}"));
+        }
+    }
+
+    private void appendToolOutput(ArrayNode messages, JsonNode item, String type) {
+        String callId = requiredText(item, "call_id", type + " requires a non-empty 'call_id'");
+        ObjectNode message = messages.addObject();
+        message.put("role", "tool");
+        message.put("tool_call_id", callId);
+        if ("tool_search_output".equals(type)) {
+            message.put("content", item.path("tools").isArray() ? item.path("tools").toString() : "[]");
+            return;
+        }
+        JsonNode output = item.path("output");
+        if (output.isArray()) {
+            message.set("content", mapContentParts(output));
+        } else {
+            message.put("content", extractText(output));
+        }
+    }
+
+    /** 全文本折叠为字符串；包含图片时保留原顺序并转换成 chat 多模态 content。 */
+    private JsonNode mapContentParts(JsonNode parts) {
+        boolean hasImage = false;
+        for (JsonNode part : parts) {
+            if ("input_image".equals(part.path("type").asText())) {
+                hasImage = true;
+                break;
+            }
+        }
+        if (!hasImage) {
+            return objectMapper.getNodeFactory().textNode(extractText(parts));
+        }
+
+        ArrayNode content = objectMapper.createArrayNode();
+        for (JsonNode part : parts) {
+            String type = part.path("type").asText("");
+            switch (type) {
+                case "input_text", "output_text", "text", "refusal" -> {
+                    String text = part.path("text").asText(part.path("refusal").asText(""));
+                    if (!text.isEmpty()) {
+                        content.addObject().put("type", "text").put("text", text);
+                    }
+                }
+                case "input_image" -> {
+                    String url = part.path("image_url").asText(part.path("url").asText(""));
+                    if (url.isEmpty()) {
+                        throw new BadRequestException("input_image requires 'image_url'; file_id images are not supported");
+                    }
+                    ObjectNode image = content.addObject();
+                    image.put("type", "image_url");
+                    ObjectNode imageUrl = image.putObject("image_url");
+                    imageUrl.put("url", url);
+                    if (part.path("detail").isTextual()) {
+                        imageUrl.set("detail", part.path("detail"));
+                    }
+                }
+                default -> throw new BadRequestException("content part type '" + type + "' is not supported");
+            }
+        }
+        return content;
+    }
+
+    private void mapToolChoice(JsonNode choice, ObjectNode chat, ToolRegistry registry) {
+        if (choice.isMissingNode() || choice.isNull()) {
+            return;
+        }
+        if (choice.isTextual()) {
+            String value = choice.asText();
+            if (!"auto".equals(value) && !"none".equals(value) && !"required".equals(value)) {
+                throw new BadRequestException("tool_choice '" + value + "' is not supported");
+            }
+            chat.put("tool_choice", value);
+            return;
+        }
+        if (!choice.isObject()) {
+            throw new BadRequestException("field 'tool_choice' must be a string or object");
+        }
+
+        String type = choice.path("type").asText("");
+        ToolKind kind = switch (type) {
+            case "function" -> ToolKind.FUNCTION;
+            case "custom" -> ToolKind.CUSTOM;
+            case "tool_search" -> ToolKind.TOOL_SEARCH;
+            default -> throw new BadRequestException("tool_choice type '" + type + "' is not supported");
+        };
+        String namespace = nullableText(choice.path("namespace"));
+        String name = kind == ToolKind.TOOL_SEARCH ? "tool_search"
+                : requiredText(choice, "name", "tool_choice requires a non-empty 'name'");
+        String chatName = registry.findChatName(kind, namespace, name);
+        if (chatName == null) {
+            throw new BadRequestException("tool_choice references an unknown tool '" + name + "'");
+        }
+        ObjectNode target = chat.putObject("tool_choice");
+        target.put("type", "function");
+        target.putObject("function").put("name", chatName);
+    }
+
+    private void mapTextFormat(JsonNode format, ObjectNode chat) {
+        if (format.isMissingNode() || format.isNull()) {
+            return;
+        }
+        if (!format.isObject()) {
+            throw new BadRequestException("field 'text.format' must be an object");
+        }
+        String type = format.path("type").asText("text");
+        switch (type) {
+            case "text" -> chat.putObject("response_format").put("type", "text");
+            case "json_object" -> chat.putObject("response_format").put("type", "json_object");
+            case "json_schema" -> {
+                JsonNode source = format.path("json_schema").isObject() ? format.path("json_schema") : format;
+                JsonNode schema = source.path("schema");
+                if (!schema.isObject()) {
+                    throw new BadRequestException("text.format type 'json_schema' requires a 'schema' object");
+                }
+                ObjectNode responseFormat = chat.putObject("response_format");
+                responseFormat.put("type", "json_schema");
+                ObjectNode jsonSchema = responseFormat.putObject("json_schema");
+                jsonSchema.put("name", source.path("name").asText("response"));
+                jsonSchema.set("schema", schema);
+                if (source.path("strict").isBoolean()) {
+                    jsonSchema.set("strict", source.path("strict"));
                 }
             }
-            return sb.toString();
-        }
-        return node.isMissingNode() || node.isNull() ? "" : node.toString();
-    }
-
-    private void copyNumber(ObjectNode target, JsonNode source, String field) {
-        if (source.path(field).isNumber()) {
-            target.set(field, source.path(field));
+            default -> throw new BadRequestException("text format type '" + type + "' is not supported by the upstream");
         }
     }
 
-    // ---------- 响应：Chat -> Responses（非流式） ----------
+    /** Chat Completions 非流式响应转为 Responses 响应。 */
+    public ObjectNode toResponsesResponse(JsonNode chatResponse, String requestedModel,
+                                          Map<String, ToolDescriptor> toolsByChatName) {
+        JsonNode choice = chatResponse.path("choices").path(0);
+        if (!choice.isObject() || !choice.path("message").isObject()) {
+            throw new UpstreamStreamException("upstream returned no chat completion choice");
+        }
 
-    public ObjectNode toResponsesResponse(JsonNode chatResp, String model) {
-        String respId = "resp_" + compactId();
-        long createdAt = System.currentTimeMillis() / 1000;
+        String responseId = "resp_" + compactId();
+        long createdAt = chatResponse.path("created").asLong(System.currentTimeMillis() / 1000);
         ArrayNode output = objectMapper.createArrayNode();
-
-        JsonNode choice = chatResp.path("choices").path(0);
         JsonNode message = choice.path("message");
-        String finishReason = choice.path("finish_reason").asText(null);
 
         JsonNode toolCalls = message.path("tool_calls");
-        int fcIndex = 0;
         if (toolCalls.isArray()) {
-            for (JsonNode tc : toolCalls) {
-                ObjectNode fc = output.addObject();
-                fc.put("type", "function_call");
-                fc.put("id", "fc_" + compactId());
-                fc.put("call_id", tc.path("id").asText("call_" + fcIndex));
-                fc.put("name", tc.path("function").path("name").asText(""));
-                fc.put("arguments", tc.path("function").path("arguments").asText(""));
-                fc.put("status", "completed");
-                fcIndex++;
+            int fallbackIndex = 0;
+            for (JsonNode toolCall : toolCalls) {
+                String chatName = toolCall.path("function").path("name").asText("");
+                String callId = toolCall.path("id").asText("call_" + fallbackIndex++);
+                String arguments = toolCall.path("function").path("arguments").asText("");
+                output.add(buildToolItem("fc_" + compactId(), callId, chatName, arguments,
+                        "completed", toolsByChatName));
             }
         }
-        String content = message.path("content").asText("");
+
+        String content = assistantText(message.path("content"));
         if (!content.isEmpty()) {
             output.add(buildMessageItem("msg_" + compactId(), content, "completed"));
         }
 
-        CallRecorder.Usage usage = null;
-        JsonNode usageNode = chatResp.path("usage");
-        if (usageNode.isObject()) {
-            usage = new CallRecorder.Usage();
-            usage.prompt = usageNode.path("prompt_tokens").asInt(0);
-            usage.completion = usageNode.path("completion_tokens").asInt(0);
-            usage.total = usageNode.path("total_tokens").asInt(0);
-            usage.cached = usageNode.path("prompt_tokens_details").path("cached_tokens").asInt(0);
-        }
-        String effectiveModel = chatResp.path("model").asText(model);
-        return buildResponse(respId, effectiveModel, createdAt,
-                "length".equals(finishReason) ? "incomplete" : "completed",
-                output, usage, "length".equals(finishReason) ? "max_output_tokens" : null);
+        CallRecorder.Usage usage = parseChatUsage(chatResponse.path("usage"));
+        String finishReason = nullableText(choice.path("finish_reason"));
+        String incompleteReason = incompleteReason(finishReason);
+        String effectiveModel = chatResponse.path("model").asText(requestedModel);
+        return buildResponse(responseId, effectiveModel, createdAt,
+                incompleteReason == null ? "completed" : "incomplete", output, usage, incompleteReason);
     }
 
-    // ---------- 流式状态机 ----------
-
-    /**
-     * 每个流式请求一个实例：输入 chat chunk JSON，输出 Responses SSE 事件串。
-     * 事件顺序：created → in_progress → (output_item.added / content_part.added / *.delta)* →
-     * 收尾：*.done / output_item.done → completed → data: [DONE]
-     */
-    public class StreamTranslator {
-
-        private final String respId = "resp_" + compactId();
-        private final String model;
-        private final long createdAt = System.currentTimeMillis() / 1000;
-
-        public StreamTranslator(String model) {
-            this.model = model == null ? "unknown" : model;
+    private CallRecorder.Usage parseChatUsage(JsonNode usageNode) {
+        if (!usageNode.isObject()) {
+            return null;
         }
+        CallRecorder.Usage usage = new CallRecorder.Usage();
+        usage.prompt = integerOrNull(usageNode.path("prompt_tokens"));
+        usage.completion = integerOrNull(usageNode.path("completion_tokens"));
+        usage.total = integerOrNull(usageNode.path("total_tokens"));
+        usage.cached = integerOrNull(usageNode.path("prompt_tokens_details").path("cached_tokens"));
+        return usage;
+    }
 
-        private int seq = 0;
-        private int nextOutputIndex = 0;
+    /** 每个上游 chat SSE 流使用一个实例。 */
+    public final class StreamTranslator {
 
+        private final String responseId = "resp_" + compactId();
+        private String model;
+        private final long createdAt = System.currentTimeMillis() / 1000;
+        private final Map<String, ToolDescriptor> toolsByChatName;
+        private final Map<Integer, ToolCallState> toolCalls = new LinkedHashMap<>();
+
+        private int sequenceNumber;
+        private int nextOutputIndex;
         private boolean textOpen;
         private String textItemId;
         private int textOutputIndex;
         private final StringBuilder fullText = new StringBuilder();
-
-        private final Map<Integer, ToolCallState> toolCalls = new LinkedHashMap<>();
-
         private String finishReason;
+        private boolean terminal;
 
-        private class ToolCallState {
-            String itemId;
-            String callId;
-            final StringBuilder name = new StringBuilder();
-            final StringBuilder arguments = new StringBuilder();
-            int outputIndex;
+        public StreamTranslator(String model, Map<String, ToolDescriptor> toolsByChatName) {
+            this.model = model == null ? "unknown" : model;
+            this.toolsByChatName = toolsByChatName == null ? Map.of() : toolsByChatName;
+        }
+
+        private final class ToolCallState {
+            String itemId = "fc_" + compactId();
+            String callId = "call_" + compactId();
+            StringBuilder chatName = new StringBuilder();
+            StringBuilder arguments = new StringBuilder();
+            int outputIndex = -1;
+            boolean added;
+
+            ToolDescriptor descriptor() {
+                return toolsByChatName.get(chatName.toString());
+            }
         }
 
         public String start() {
-            StringBuilder sb = new StringBuilder();
-            ObjectNode skeleton = objectMapper.createObjectNode();
-            skeleton.put("id", respId);
-            skeleton.put("object", "response");
-            skeleton.put("created_at", createdAt);
-            skeleton.put("status", "in_progress");
-            skeleton.put("model", model);
-            skeleton.putArray("output");
-            sb.append(renderEvent("response.created", withResponse(skeleton)));
-            ObjectNode skeleton2 = skeleton.deepCopy();
-            sb.append(renderEvent("response.in_progress", withResponse(skeleton2)));
-            return sb.toString();
+            ObjectNode skeleton = buildResponse(responseId, model, createdAt, "in_progress",
+                    objectMapper.createArrayNode(), null, null);
+            return renderEvent("response.created", withResponse(skeleton))
+                    + renderEvent("response.in_progress", withResponse(skeleton.deepCopy()));
         }
 
         public String onChunk(String payloadJson) {
+            if (terminal) {
+                return "";
+            }
             JsonNode chunk;
             try {
                 chunk = objectMapper.readTree(payloadJson);
             } catch (Exception e) {
+                throw new UpstreamStreamException("upstream sent invalid SSE JSON");
+            }
+            if (chunk.path("error").isObject()) {
+                throw new UpstreamStreamException(upstreamErrorMessage(chunk.path("error")));
+            }
+            if (chunk.path("model").isTextual()) {
+                model = chunk.path("model").asText();
+            }
+
+            JsonNode choice = chunk.path("choices").path(0);
+            if (!choice.isObject()) {
                 return "";
             }
-            StringBuilder sb = new StringBuilder();
-            JsonNode choice = chunk.path("choices").path(0);
             JsonNode delta = choice.path("delta");
+            StringBuilder events = new StringBuilder();
 
-            String content = delta.path("content").asText(null);
-            if (content != null && !content.isEmpty()) {
-                if (!textOpen) {
-                    textOpen = true;
-                    textItemId = "msg_" + compactId();
-                    textOutputIndex = nextOutputIndex++;
-                    ObjectNode item = objectMapper.createObjectNode();
-                    item.put("id", textItemId);
-                    item.put("type", "message");
-                    item.put("role", "assistant");
-                    item.put("status", "in_progress");
-                    item.putArray("content");
-                    sb.append(renderEvent("response.output_item.added", itemEvent(textOutputIndex, item)));
-                    ObjectNode part = objectMapper.createObjectNode();
-                    part.put("type", "output_text");
-                    part.put("text", "");
-                    part.putArray("annotations");
-                    ObjectNode ev = objectMapper.createObjectNode();
-                    ev.put("item_id", textItemId);
-                    ev.put("output_index", textOutputIndex);
-                    ev.put("content_index", 0);
-                    ev.set("part", part);
-                    sb.append(renderEvent("response.content_part.added", ev));
-                }
-                ObjectNode ev = objectMapper.createObjectNode();
-                ev.put("item_id", textItemId);
-                ev.put("output_index", textOutputIndex);
-                ev.put("content_index", 0);
-                ev.put("delta", content);
-                sb.append(renderEvent("response.output_text.delta", ev));
+            String content = assistantText(delta.path("content"));
+            if (!content.isEmpty()) {
+                openText(events);
+                ObjectNode event = objectMapper.createObjectNode();
+                event.put("item_id", textItemId);
+                event.put("output_index", textOutputIndex);
+                event.put("content_index", 0);
+                event.put("delta", content);
+                events.append(renderEvent("response.output_text.delta", event));
                 fullText.append(content);
             }
 
-            JsonNode tcs = delta.path("tool_calls");
-            if (tcs.isArray()) {
-                for (JsonNode tc : tcs) {
-                    int index = tc.path("index").asInt(0);
-                    ToolCallState state = toolCalls.get(index);
-                    if (state == null) {
-                        state = new ToolCallState();
-                        state.itemId = "fc_" + compactId();
-                        state.callId = tc.path("id").asText("");
-                        if (state.callId.isEmpty()) {
-                            state.callId = "call_" + compactId();
-                        }
-                        state.outputIndex = nextOutputIndex++;
-                        toolCalls.put(index, state);
-
-                        ObjectNode item = objectMapper.createObjectNode();
-                        item.put("id", state.itemId);
-                        item.put("type", "function_call");
-                        item.put("call_id", state.callId);
-                        item.put("name", tc.path("function").path("name").asText(""));
-                        item.put("arguments", "");
-                        item.put("status", "in_progress");
-                        sb.append(renderEvent("response.output_item.added", itemEvent(state.outputIndex, item)));
-                    }
-                    String id = tc.path("id").asText(null);
-                    if (id != null && !id.isEmpty()) {
+            JsonNode calls = delta.path("tool_calls");
+            if (calls.isArray()) {
+                for (JsonNode call : calls) {
+                    int index = call.path("index").asInt(0);
+                    ToolCallState state = toolCalls.computeIfAbsent(index, ignored -> new ToolCallState());
+                    String id = nullableText(call.path("id"));
+                    if (id != null) {
                         state.callId = id;
                     }
-                    String name = tc.path("function").path("name").asText(null);
-                    if (name != null) {
-                        state.name.append(name);
+                    String nameDelta = nullableText(call.path("function").path("name"));
+                    if (nameDelta != null) {
+                        state.chatName.append(nameDelta);
                     }
-                    String args = tc.path("function").path("arguments").asText(null);
-                    if (args != null && !args.isEmpty()) {
-                        ObjectNode ev = objectMapper.createObjectNode();
-                        ev.put("item_id", state.itemId);
-                        ev.put("output_index", state.outputIndex);
-                        ev.put("delta", args);
-                        sb.append(renderEvent("response.function_call_arguments.delta", ev));
-                        state.arguments.append(args);
+                    JsonNode argumentsNode = call.path("function").path("arguments");
+                    String argumentDelta = argumentsNode.isTextual() ? argumentsNode.asText() : null;
+                    if (argumentDelta != null && !argumentDelta.isEmpty()) {
+                        ensureToolAdded(state, events);
+                        state.arguments.append(argumentDelta);
+                        if (toolKind(state) == ToolKind.FUNCTION) {
+                            ObjectNode event = objectMapper.createObjectNode();
+                            event.put("item_id", state.itemId);
+                            event.put("output_index", state.outputIndex);
+                            event.put("delta", argumentDelta);
+                            events.append(renderEvent("response.function_call_arguments.delta", event));
+                        }
                     }
                 }
             }
 
-            String fr = choice.path("finish_reason").asText(null);
-            if (fr != null && !fr.isEmpty()) {
-                finishReason = fr;
+            String reason = nullableText(choice.path("finish_reason"));
+            if (reason != null) {
+                finishReason = reason;
             }
-            return sb.toString();
+            return events.toString();
+        }
+
+        private void openText(StringBuilder events) {
+            if (textOpen) {
+                return;
+            }
+            textOpen = true;
+            textItemId = "msg_" + compactId();
+            textOutputIndex = nextOutputIndex++;
+
+            ObjectNode item = objectMapper.createObjectNode();
+            item.put("id", textItemId);
+            item.put("type", "message");
+            item.put("role", "assistant");
+            item.put("status", "in_progress");
+            item.putArray("content");
+            events.append(renderEvent("response.output_item.added", itemEvent(textOutputIndex, item)));
+
+            ObjectNode part = objectMapper.createObjectNode();
+            part.put("type", "output_text");
+            part.put("text", "");
+            part.putArray("annotations");
+            ObjectNode event = objectMapper.createObjectNode();
+            event.put("item_id", textItemId);
+            event.put("output_index", textOutputIndex);
+            event.put("content_index", 0);
+            event.set("part", part);
+            events.append(renderEvent("response.content_part.added", event));
+        }
+
+        /** 工具名可能跨 chunk，等到首段 arguments 到达后才发 added，避免把半个名字发给 Codex。 */
+        private void ensureToolAdded(ToolCallState state, StringBuilder events) {
+            if (state.added) {
+                return;
+            }
+            if (state.chatName.isEmpty()) {
+                throw new UpstreamStreamException("upstream tool call is missing a function name");
+            }
+            state.outputIndex = nextOutputIndex++;
+            state.added = true;
+            ObjectNode item = buildToolItem(state.itemId, state.callId, state.chatName.toString(), "",
+                    "in_progress", toolsByChatName);
+            events.append(renderEvent("response.output_item.added", itemEvent(state.outputIndex, item)));
+        }
+
+        private ToolKind toolKind(ToolCallState state) {
+            ToolDescriptor descriptor = state.descriptor();
+            return descriptor == null ? ToolKind.FUNCTION : descriptor.kind();
         }
 
         public String finish(CallRecorder.Usage usage) {
-            StringBuilder sb = new StringBuilder();
+            if (terminal) {
+                return "";
+            }
+            StringBuilder events = new StringBuilder();
+            for (ToolCallState state : toolCalls.values()) {
+                ensureToolAdded(state, events);
+            }
+            terminal = true;
+
             List<ObjectNode> finalOutput = new ArrayList<>();
             Object[] ordered = new Object[nextOutputIndex];
             if (textOpen) {
-                ordered[textOutputIndex] = new Object[]{textOutputIndex, "text"};
+                ordered[textOutputIndex] = "text";
             }
-            for (ToolCallState st : toolCalls.values()) {
-                ordered[st.outputIndex] = new Object[]{st.outputIndex, "tool", st};
+            for (ToolCallState state : toolCalls.values()) {
+                ordered[state.outputIndex] = state;
             }
+
             for (Object entry : ordered) {
-                if (entry == null) {
-                    continue;
-                }
-                Object[] e = (Object[]) entry;
-                if ("text".equals(e[1])) {
-                    ObjectNode part = objectMapper.createObjectNode();
-                    part.put("type", "output_text");
-                    part.put("text", fullText.toString());
-                    part.putArray("annotations");
-
-                    ObjectNode doneEv = objectMapper.createObjectNode();
-                    doneEv.put("item_id", textItemId);
-                    doneEv.put("output_index", textOutputIndex);
-                    doneEv.put("content_index", 0);
-                    doneEv.put("text", fullText.toString());
-                    sb.append(renderEvent("response.output_text.done", doneEv));
-
-                    ObjectNode partEv = objectMapper.createObjectNode();
-                    partEv.put("item_id", textItemId);
-                    partEv.put("output_index", textOutputIndex);
-                    partEv.put("content_index", 0);
-                    partEv.set("part", part);
-                    sb.append(renderEvent("response.content_part.done", partEv));
-
-                    ObjectNode item = buildMessageItem(textItemId, fullText.toString(), "completed");
-                    sb.append(renderEvent("response.output_item.done", itemEvent(textOutputIndex, item)));
-                    finalOutput.add(item);
-                } else {
-                    ToolCallState st = (ToolCallState) e[2];
-                    ObjectNode doneEv = objectMapper.createObjectNode();
-                    doneEv.put("item_id", st.itemId);
-                    doneEv.put("output_index", st.outputIndex);
-                    doneEv.put("arguments", st.arguments.toString());
-                    sb.append(renderEvent("response.function_call_arguments.done", doneEv));
-
-                    ObjectNode item = objectMapper.createObjectNode();
-                    item.put("id", st.itemId);
-                    item.put("type", "function_call");
-                    item.put("call_id", st.callId);
-                    item.put("name", st.name.toString());
-                    item.put("arguments", st.arguments.toString());
-                    item.put("status", "completed");
-                    sb.append(renderEvent("response.output_item.done", itemEvent(st.outputIndex, item)));
-                    finalOutput.add(item);
+                if ("text".equals(entry)) {
+                    finishText(events, finalOutput);
+                } else if (entry instanceof ToolCallState state) {
+                    finishTool(state, events, finalOutput);
                 }
             }
 
-            boolean incomplete = "length".equals(finishReason);
-            ObjectNode response = buildResponse(respId, model, createdAt,
-                    incomplete ? "incomplete" : "completed", toArray(finalOutput), usage,
-                    incomplete ? "max_output_tokens" : null);
-            sb.append(renderEvent("response.completed", withResponse(response)));
-            sb.append("data: [DONE]\n\n");
-            return sb.toString();
+            String reason = incompleteReason(finishReason);
+            ObjectNode response = buildResponse(responseId, model, createdAt,
+                    reason == null ? "completed" : "incomplete", toArray(finalOutput), usage, reason);
+            events.append(renderEvent(reason == null ? "response.completed" : "response.incomplete",
+                    withResponse(response)));
+            return events.toString();
+        }
+
+        private void finishText(StringBuilder events, List<ObjectNode> finalOutput) {
+            ObjectNode part = objectMapper.createObjectNode();
+            part.put("type", "output_text");
+            part.put("text", fullText.toString());
+            part.putArray("annotations");
+
+            ObjectNode textDone = objectMapper.createObjectNode();
+            textDone.put("item_id", textItemId);
+            textDone.put("output_index", textOutputIndex);
+            textDone.put("content_index", 0);
+            textDone.put("text", fullText.toString());
+            events.append(renderEvent("response.output_text.done", textDone));
+
+            ObjectNode partDone = objectMapper.createObjectNode();
+            partDone.put("item_id", textItemId);
+            partDone.put("output_index", textOutputIndex);
+            partDone.put("content_index", 0);
+            partDone.set("part", part);
+            events.append(renderEvent("response.content_part.done", partDone));
+
+            ObjectNode item = buildMessageItem(textItemId, fullText.toString(), "completed");
+            events.append(renderEvent("response.output_item.done", itemEvent(textOutputIndex, item)));
+            finalOutput.add(item);
+        }
+
+        private void finishTool(ToolCallState state, StringBuilder events, List<ObjectNode> finalOutput) {
+            ToolKind kind = toolKind(state);
+            String arguments = state.arguments.toString();
+            if (kind == ToolKind.FUNCTION) {
+                ObjectNode argumentsDone = objectMapper.createObjectNode();
+                argumentsDone.put("item_id", state.itemId);
+                argumentsDone.put("output_index", state.outputIndex);
+                argumentsDone.put("arguments", arguments);
+                events.append(renderEvent("response.function_call_arguments.done", argumentsDone));
+            } else if (kind == ToolKind.CUSTOM) {
+                String input = decodeCustomInput(arguments);
+                if (!input.isEmpty()) {
+                    ObjectNode inputDelta = objectMapper.createObjectNode();
+                    inputDelta.put("item_id", state.itemId);
+                    inputDelta.put("output_index", state.outputIndex);
+                    inputDelta.put("delta", input);
+                    events.append(renderEvent("response.custom_tool_call_input.delta", inputDelta));
+                }
+                ObjectNode inputDone = objectMapper.createObjectNode();
+                inputDone.put("item_id", state.itemId);
+                inputDone.put("output_index", state.outputIndex);
+                inputDone.put("input", input);
+                events.append(renderEvent("response.custom_tool_call_input.done", inputDone));
+            }
+
+            ObjectNode item = buildToolItem(state.itemId, state.callId, state.chatName.toString(),
+                    arguments, "completed", toolsByChatName);
+            events.append(renderEvent("response.output_item.done", itemEvent(state.outputIndex, item)));
+            finalOutput.add(item);
         }
 
         public String failed(String message) {
-            ObjectNode response = objectMapper.createObjectNode();
-            response.put("id", respId);
-            response.put("object", "response");
-            response.put("created_at", createdAt);
-            response.put("status", "failed");
-            response.put("model", model);
-            response.putArray("output");
-            ObjectNode err = response.putObject("error");
-            err.put("type", "server_error");
-            err.put("message", message);
-            return renderEvent("response.failed", withResponse(response)) + "data: [DONE]\n\n";
+            if (terminal) {
+                return "";
+            }
+            terminal = true;
+            ObjectNode response = buildResponse(responseId, model, createdAt, "failed",
+                    objectMapper.createArrayNode(), null, null);
+            ObjectNode error = response.putObject("error");
+            error.put("type", "server_error");
+            error.put("code", "upstream_stream_error");
+            error.put("message", message);
+            return renderEvent("response.failed", withResponse(response));
         }
 
-        public String responseId() {
-            return respId;
+        public boolean isTerminal() {
+            return terminal;
         }
 
         private String renderEvent(String type, ObjectNode data) {
             data.put("type", type);
-            data.put("sequence_number", seq++);
-            return "event: " + type + "\ndata: " + data.toString() + "\n\n";
+            data.put("sequence_number", sequenceNumber++);
+            return "event: " + type + "\ndata: " + data + "\n\n";
         }
     }
 
-    // ---------- 渲染 helpers ----------
+    private ObjectNode buildToolItem(String itemId, String callId, String chatName, String arguments,
+                                     String status, Map<String, ToolDescriptor> toolsByChatName) {
+        ToolDescriptor descriptor = toolsByChatName == null ? null : toolsByChatName.get(chatName);
+        ToolKind kind = descriptor == null ? ToolKind.FUNCTION : descriptor.kind();
+        ObjectNode item = objectMapper.createObjectNode();
+        item.put("id", itemId);
+        item.put("call_id", callId);
+        item.put("status", status);
+
+        if (kind == ToolKind.CUSTOM) {
+            item.put("type", "custom_tool_call");
+            item.put("name", descriptor.name());
+            if (descriptor.namespace() != null) {
+                item.put("namespace", descriptor.namespace());
+            }
+            item.put("input", decodeCustomInput(arguments));
+        } else if (kind == ToolKind.TOOL_SEARCH) {
+            item.put("type", "tool_search_call");
+            item.put("execution", descriptor.execution() == null ? "client" : descriptor.execution());
+            item.set("arguments", parseArguments(arguments));
+        } else {
+            item.put("type", "function_call");
+            item.put("name", descriptor == null ? chatName : descriptor.name());
+            if (descriptor != null && descriptor.namespace() != null) {
+                item.put("namespace", descriptor.namespace());
+            }
+            item.put("arguments", arguments);
+        }
+        return item;
+    }
+
+    private JsonNode parseArguments(String arguments) {
+        if (arguments == null || arguments.isBlank()) {
+            return objectMapper.createObjectNode();
+        }
+        try {
+            return objectMapper.readTree(arguments);
+        } catch (Exception e) {
+            return objectMapper.getNodeFactory().textNode(arguments);
+        }
+    }
+
+    private String decodeCustomInput(String arguments) {
+        if (arguments == null || arguments.isEmpty()) {
+            return "";
+        }
+        try {
+            JsonNode parsed = objectMapper.readTree(arguments);
+            JsonNode input = parsed.path("input");
+            if (input.isTextual()) {
+                return input.asText();
+            }
+            if (!input.isMissingNode() && !input.isNull()) {
+                return input.toString();
+            }
+        } catch (Exception ignored) {
+            // 某些模型可能直接输出 free-form 文本；原样交还客户端。
+        }
+        return arguments;
+    }
 
     private ObjectNode buildMessageItem(String id, String text, String status) {
         ObjectNode item = objectMapper.createObjectNode();
@@ -559,8 +904,7 @@ public class ResponsesAdapter {
         item.put("type", "message");
         item.put("role", "assistant");
         item.put("status", status);
-        ArrayNode content = item.putArray("content");
-        ObjectNode part = content.addObject();
+        ObjectNode part = item.putArray("content").addObject();
         part.put("type", "output_text");
         part.put("text", text);
         part.putArray("annotations");
@@ -573,55 +917,213 @@ public class ResponsesAdapter {
         response.put("id", id);
         response.put("object", "response");
         response.put("created_at", createdAt);
+        if ("completed".equals(status) || "incomplete".equals(status) || "failed".equals(status)) {
+            response.put("completed_at", System.currentTimeMillis() / 1000);
+        } else {
+            response.putNull("completed_at");
+        }
         response.put("status", status);
         response.putNull("error");
-        if (incompleteReason != null) {
-            response.putObject("incomplete_details").put("reason", incompleteReason);
-        } else {
+        if (incompleteReason == null) {
             response.putNull("incomplete_details");
+        } else {
+            response.putObject("incomplete_details").put("reason", incompleteReason);
         }
-        response.put("model", model);
+        response.putNull("instructions");
+        response.putNull("max_output_tokens");
+        response.put("model", model == null ? "unknown" : model);
         response.set("output", output);
         response.put("parallel_tool_calls", true);
+        response.putNull("previous_response_id");
+        response.put("store", false);
         response.put("tool_choice", "auto");
         response.putArray("tools");
+        response.putObject("text").putObject("format").put("type", "text");
+        response.put("truncation", "disabled");
+        response.putObject("metadata");
         if (usage != null) {
-            ObjectNode u = response.putObject("usage");
-            u.put("input_tokens", usage.prompt == null ? 0 : usage.prompt);
-            u.put("output_tokens", usage.completion == null ? 0 : usage.completion);
-            u.put("total_tokens", usage.total == null ? 0 : usage.total);
-            u.putObject("input_tokens_details").put("cached_tokens", usage.cached == null ? 0 : usage.cached);
-            u.putObject("output_tokens_details").put("reasoning_tokens", 0);
+            ObjectNode target = response.putObject("usage");
+            target.put("input_tokens", zeroIfNull(usage.prompt));
+            target.put("output_tokens", zeroIfNull(usage.completion));
+            target.put("total_tokens", zeroIfNull(usage.total));
+            target.putObject("input_tokens_details").put("cached_tokens", zeroIfNull(usage.cached));
+            target.putObject("output_tokens_details").put("reasoning_tokens", 0);
+        } else {
+            response.putNull("usage");
         }
         return response;
     }
 
-    private ArrayNode toArray(List<ObjectNode> items) {
-        ArrayNode arr = objectMapper.createArrayNode();
-        for (ObjectNode item : items) {
-            arr.add(item);
+    private String incompleteReason(String finishReason) {
+        if (finishReason == null || "stop".equals(finishReason) || "tool_calls".equals(finishReason)) {
+            return null;
         }
-        return arr;
+        return switch (finishReason) {
+            case "length" -> "max_output_tokens";
+            case "content_filter" -> "content_filter";
+            default -> "max_output_tokens";
+        };
+    }
+
+    private String upstreamErrorMessage(JsonNode error) {
+        String message = error.path("message").asText("upstream stream error");
+        String type = error.path("type").asText("");
+        return type.isEmpty() ? message : type + ": " + message;
+    }
+
+    private String assistantText(JsonNode content) {
+        if (content.isTextual()) {
+            return content.asText();
+        }
+        if (content.isArray()) {
+            return extractText(content);
+        }
+        return "";
+    }
+
+    private String extractText(JsonNode node) {
+        if (node.isTextual()) {
+            return node.asText();
+        }
+        if (node.isArray()) {
+            StringBuilder text = new StringBuilder();
+            for (JsonNode part : node) {
+                if (part.isTextual()) {
+                    text.append(part.asText());
+                } else if (part.path("text").isTextual()) {
+                    text.append(part.path("text").asText());
+                } else if (part.path("refusal").isTextual()) {
+                    text.append(part.path("refusal").asText());
+                }
+            }
+            return text.toString();
+        }
+        if (node.isMissingNode() || node.isNull()) {
+            return "";
+        }
+        return node.toString();
+    }
+
+    private boolean isSystemMessage(JsonNode item) {
+        if (!"message".equals(inputItemType(item))) {
+            return false;
+        }
+        String role = item.path("role").asText("");
+        return "developer".equals(role) || "system".equals(role);
+    }
+
+    private String inputItemType(JsonNode item) {
+        return item.path("type").asText(item.has("role") ? "message" : "");
+    }
+
+    private String requiredText(JsonNode node, String field, String message) {
+        String value = nullableText(node.path(field));
+        if (value == null) {
+            throw new BadRequestException(message);
+        }
+        return value;
+    }
+
+    private String nullableText(JsonNode node) {
+        if (!node.isTextual() || node.asText().isBlank()) {
+            return null;
+        }
+        return node.asText();
+    }
+
+    private void copyNumber(ObjectNode target, JsonNode source, String field) {
+        if (source.path(field).isNumber()) {
+            target.set(field, source.path(field));
+        }
+    }
+
+    private void copyIfPresent(JsonNode source, ObjectNode target, String field) {
+        if (source.has(field) && !source.path(field).isNull()) {
+            target.set(field, source.path(field));
+        }
+    }
+
+    private Integer integerOrNull(JsonNode value) {
+        return value.isIntegralNumber() ? value.asInt() : null;
+    }
+
+    private int zeroIfNull(Integer value) {
+        return value == null ? 0 : value;
+    }
+
+    private ArrayNode toArray(List<ObjectNode> items) {
+        ArrayNode array = objectMapper.createArrayNode();
+        items.forEach(array::add);
+        return array;
     }
 
     private ObjectNode itemEvent(int outputIndex, ObjectNode item) {
-        ObjectNode ev = objectMapper.createObjectNode();
-        ev.put("output_index", outputIndex);
-        ev.set("item", item);
-        return ev;
+        ObjectNode event = objectMapper.createObjectNode();
+        event.put("output_index", outputIndex);
+        event.set("item", item);
+        return event;
     }
 
     private ObjectNode withResponse(ObjectNode response) {
-        ObjectNode ev = objectMapper.createObjectNode();
-        ev.set("response", response);
-        return ev;
+        ObjectNode event = objectMapper.createObjectNode();
+        event.set("response", response);
+        return event;
     }
 
     private String compactId() {
-        return UUID.randomUUID().toString().replace("-", "").substring(0, 20);
+        return UUID.randomUUID().toString().replace("-", "").substring(0, 24);
     }
 
-    public byte[] utf8(String s) {
-        return s.getBytes(StandardCharsets.UTF_8);
+    byte[] utf8(String value) {
+        return value.getBytes(StandardCharsets.UTF_8);
+    }
+
+    private static String safeChatName(String namespace, String name) {
+        String raw = namespace == null ? name : namespace + "__" + name;
+        String safe = raw.replaceAll("[^a-zA-Z0-9_-]", "_");
+        if (safe.isBlank()) {
+            safe = "tool";
+        }
+        return safe.length() <= CHAT_TOOL_NAME_MAX_LENGTH ? safe
+                : safe.substring(0, CHAT_TOOL_NAME_MAX_LENGTH);
+    }
+
+    private final class ToolRegistry {
+        private final Map<String, ToolDescriptor> byChatName = new LinkedHashMap<>();
+
+        String register(ToolKind kind, String namespace, String name, String execution) {
+            if (findChatName(kind, namespace, name) != null) {
+                throw new BadRequestException("duplicate tool '" + displayName(namespace, name) + "'");
+            }
+            String base = safeChatName(namespace, name);
+            String candidate = base;
+            int suffix = 2;
+            while (byChatName.containsKey(candidate)) {
+                String ending = "_" + suffix++;
+                int prefixLength = Math.min(base.length(), CHAT_TOOL_NAME_MAX_LENGTH - ending.length());
+                candidate = base.substring(0, prefixLength) + ending;
+            }
+            byChatName.put(candidate, new ToolDescriptor(kind, namespace, name, execution));
+            return candidate;
+        }
+
+        String findChatName(ToolKind kind, String namespace, String name) {
+            for (Map.Entry<String, ToolDescriptor> entry : byChatName.entrySet()) {
+                ToolDescriptor descriptor = entry.getValue();
+                if (descriptor.kind() == kind && equalsNullable(descriptor.namespace(), namespace)
+                        && descriptor.name().equals(name)) {
+                    return entry.getKey();
+                }
+            }
+            return null;
+        }
+
+        private boolean equalsNullable(String left, String right) {
+            return left == null ? right == null : left.equals(right);
+        }
+
+        private String displayName(String namespace, String name) {
+            return namespace == null ? name : namespace + "." + name;
+        }
     }
 }

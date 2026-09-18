@@ -266,10 +266,11 @@ CREATE INDEX idx_audit_log_time ON audit_log(created_at DESC);
 
 为仅支持 OpenAI Responses API 的客户端（Codex CLI/IDE/桌面版，新版已移除 `wire_api = "chat"`）提供 `/v1/responses` 入口，代码在独立子包 `com.llama.hub.responses`（Controller 精确路径优先于 `/v1/**` 通配）：
 
-- **请求转换**（`ResponsesAdapter.toChatRequest`）：`input`（字符串 / message / function_call / function_call_output item 数组）→ `messages`；`instructions` → system；`max_output_tokens`→`max_tokens`；`tools`/`tool_choice`/`text.format`→`response_format` 映射；流式自动注入 `stream_options.include_usage`
-- **显式拒绝（400）**：`previous_response_id`（无状态）、`background`、非 function 工具（web_search 等内置工具）、未知 input item 类型；`store`/`include`/`reasoning` 等无对应语义的参数忽略
+- **请求转换**（`ResponsesAdapter.toChatRequest`）：`input`（字符串、message、function/custom/tool_search 调用及输出）→ `messages`；`instructions` 和 developer/system 消息合并为开头 system；`max_output_tokens`→`max_tokens`；`text.format`→`response_format`；流式自动注入 `stream_options.include_usage`
+- **工具适配**：function 直接转 chat function；namespace 内 function/custom 使用请求级安全别名展平，响应时还原 namespace/name；custom free-form 工具用 `{input:string}` chat function 承载并还原为 `custom_tool_call`；client tool_search 同样经 function 承载；工具历史中的并行调用合并为同一条 assistant tool_calls 消息
+- **显式拒绝（400）**：`previous_response_id` / `conversation`（无状态）、`background`、web_search 等必须由服务端执行的内置工具、未知 input item/content part；`store`/`include`/`reasoning` 等无对应语义的参数忽略
 - **非流式响应**：`choices[0].message` → `output` 数组（function_call item + message item），`finish_reason=length` → `status=incomplete`
-- **流式**：chat chunk 合成 Responses SSE 事件序列（`response.created` → `in_progress` → `output_item.added`/`content_part.added`/`output_text.delta`/`function_call_arguments.delta` → `*.done` → `response.completed` → `[DONE]`），sequence_number 递增；上游中断发 `response.failed`
+- **流式**：chat chunk 合成 Responses SSE 事件序列（`response.created` → `in_progress` → `output_item.added`/`content_part.added`/文本或工具参数 delta → `*.done` → `response.completed`）；`finish_reason=length/content_filter` 发 `response.incomplete`，只有收到上游 `[DONE]` 才正常收口，上游断流或错误事件发 `response.failed`
 - **记账**：与透传链路共用 `CallRecorder`（usage 解析/限额计数/调用日志），`endpoint` 记 `/v1/responses`；上游 TabbyAPI 非流式不返回 usage 时与 chat 链路同样不记
 - 已知限制：模型 thinking（reasoning_content）不回传，会占用输出预算；`previous_response_id` 会话续写不支持，客户端需全量发送上下文
 
