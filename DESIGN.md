@@ -258,8 +258,20 @@ CREATE INDEX idx_audit_log_time ON audit_log(created_at DESC);
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| * | `/v1/**` | 透传到 llama-server |
+| POST | `/v1/responses` | Responses API 适配（见下节），网关内转换为上游 chat/completions |
+| * | `/v1/**` | 透传到上游推理服务（llama-server / TabbyAPI） |
 | GET | `/health` | 网关自身健康检查 |
+
+### Responses API 适配层
+
+为仅支持 OpenAI Responses API 的客户端（Codex CLI/IDE/桌面版，新版已移除 `wire_api = "chat"`）提供 `/v1/responses` 入口，代码在独立子包 `com.llama.hub.responses`（Controller 精确路径优先于 `/v1/**` 通配）：
+
+- **请求转换**（`ResponsesAdapter.toChatRequest`）：`input`（字符串 / message / function_call / function_call_output item 数组）→ `messages`；`instructions` → system；`max_output_tokens`→`max_tokens`；`tools`/`tool_choice`/`text.format`→`response_format` 映射；流式自动注入 `stream_options.include_usage`
+- **显式拒绝（400）**：`previous_response_id`（无状态）、`background`、非 function 工具（web_search 等内置工具）、未知 input item 类型；`store`/`include`/`reasoning` 等无对应语义的参数忽略
+- **非流式响应**：`choices[0].message` → `output` 数组（function_call item + message item），`finish_reason=length` → `status=incomplete`
+- **流式**：chat chunk 合成 Responses SSE 事件序列（`response.created` → `in_progress` → `output_item.added`/`content_part.added`/`output_text.delta`/`function_call_arguments.delta` → `*.done` → `response.completed` → `[DONE]`），sequence_number 递增；上游中断发 `response.failed`
+- **记账**：与透传链路共用 `CallRecorder`（usage 解析/限额计数/调用日志），`endpoint` 记 `/v1/responses`；上游 TabbyAPI 非流式不返回 usage 时与 chat 链路同样不记
+- 已知限制：模型 thinking（reasoning_content）不回传，会占用输出预算；`previous_response_id` 会话续写不支持，客户端需全量发送上下文
 
 ## 安全设计
 
