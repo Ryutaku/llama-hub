@@ -198,12 +198,33 @@ class ResponsesAdapterTest {
     }
 
     @Test
-    void rejectsServerExecutedBuiltInToolsInsteadOfSilentlyDroppingThem() {
+    void ignoresServerExecutedBuiltInToolsAndTheirHistoryButRejectsUnknownTypes() throws Exception {
+        ResponsesAdapter.PreparedChatRequest prepared = adapter.toChatRequest(bytes("""
+                {"model":"local-model","input":"search","tools":[
+                  {"type":"web_search"},
+                  {"type":"web_search_preview"},
+                  {"type":"function","name":"local","parameters":{"type":"object"}}
+                ]}
+                """));
+        JsonNode chat = objectMapper.readTree(prepared.body);
+        assertEquals(1, chat.path("tools").size());
+        assertEquals("local", chat.path("tools").path(0).path("function").path("name").asText());
+
+        ResponsesAdapter.PreparedChatRequest withHistory = adapter.toChatRequest(bytes("""
+                {"model":"local-model","input":[
+                  {"type":"message","role":"user","content":"hi"},
+                  {"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","query":"x"}},
+                  {"type":"message","role":"assistant","content":"done"}
+                ]}
+                """));
+        JsonNode historyChat = objectMapper.readTree(withHistory.body);
+        assertEquals(2, historyChat.path("messages").size());
+
         ResponsesAdapter.BadRequestException error = assertThrows(ResponsesAdapter.BadRequestException.class,
                 () -> adapter.toChatRequest(bytes("""
-                        {"model":"local-model","input":"search","tools":[{"type":"web_search"}]}
+                        {"model":"local-model","input":"x","tools":[{"type":"mystery_tool"}]}
                         """)));
-        assertTrue(error.getMessage().contains("web_search"));
+        assertTrue(error.getMessage().contains("mystery_tool"));
     }
 
     @Test

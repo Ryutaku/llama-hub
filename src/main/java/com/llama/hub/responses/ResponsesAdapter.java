@@ -1,6 +1,7 @@
 package com.llama.hub.responses;
 
 import com.llama.hub.service.CallRecorder;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -12,19 +13,33 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
  * OpenAI Responses API 与上游 Chat Completions API 之间的无状态协议适配器。
  *
  * <p>网关只模拟客户端侧能力：function、custom、namespace 和 client tool_search。
- * web_search 等必须由服务端执行的内置工具无法由 llama-server 代办，因此明确返回 400，
- * 不静默丢弃工具。</p>
+ * web_search 等必须由服务端执行的内置工具无法由 llama-server 代办：工具定义与调用历史
+ * 直接忽略（单个托管工具不应导致整个会话 400），只有未知工具类型才显式拒绝。</p>
  */
 @Component
+@Slf4j
 public class ResponsesAdapter {
 
     private static final int CHAT_TOOL_NAME_MAX_LENGTH = 64;
+
+    /** 必须由 OpenAI 服务端执行的内置/托管工具：上游无法提供，工具定义与调用历史均忽略 */
+    private static final Set<String> SERVER_EXECUTED_TOOLS = Set.of(
+            "web_search", "web_search_preview", "file_search", "code_interpreter",
+            "image_generation", "computer_use_preview", "computer", "mcp",
+            "local_shell", "shell", "apply_patch", "programmatic_tool_calling");
+
+    /** 服务端托管调用的历史 item：chat 上游无对应表示，跳过不回传 */
+    private static final Set<String> SERVER_EXECUTED_CALL_ITEMS = Set.of(
+            "web_search_call", "file_search_call", "code_interpreter_call", "image_generation_call",
+            "computer_call", "mcp_call", "mcp_list_tools", "mcp_approval_request",
+            "local_shell_call", "shell_call", "apply_patch_call");
 
     private final ObjectMapper objectMapper;
 
@@ -154,8 +169,14 @@ public class ResponsesAdapter {
                 case "custom" -> addCustomTool(chatTools, tool, null, registry);
                 case "namespace" -> addNamespaceTools(chatTools, tool, registry);
                 case "tool_search" -> addToolSearch(chatTools, tool, registry);
-                default -> throw new BadRequestException("tool type '" + type
-                        + "' is not supported by the chat-completions upstream");
+                default -> {
+                    if (SERVER_EXECUTED_TOOLS.contains(type)) {
+                        log.debug("Ignoring server-executed tool '{}': upstream chat completions cannot serve it", type);
+                    } else {
+                        throw new BadRequestException("tool type '" + type
+                                + "' is not supported by the chat-completions upstream");
+                    }
+                }
             }
         }
         if (!chatTools.isEmpty()) {
@@ -300,7 +321,8 @@ public class ResponsesAdapter {
         ObjectNode pendingAssistant = null;
         for (JsonNode item : input) {
             String type = inputItemType(item);
-            if (isSystemMessage(item) || "reasoning".equals(type) || "item_reference".equals(type)) {
+            if (isSystemMessage(item) || "reasoning".equals(type) || "item_reference".equals(type)
+                    || SERVER_EXECUTED_CALL_ITEMS.contains(type)) {
                 continue;
             }
             if (isToolCall(type)) {
