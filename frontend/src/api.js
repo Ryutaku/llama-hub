@@ -89,6 +89,7 @@ export const api = {
     }),
   dashboard: () => request('/api/admin/dashboard'),
   usageStats: (params) => request(`/api/admin/stats/usage?${qs(params)}`),
+  dailyStats: (params) => request(`/api/admin/stats/daily?${qs(params)}`),
   upstreamStatus: () => request('/api/admin/upstream/status'),
   keys: () => request('/api/admin/keys'),
   createKey: (data) => request('/api/admin/keys', { method: 'POST', body: JSON.stringify(data) }),

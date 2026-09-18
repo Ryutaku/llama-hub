@@ -7,6 +7,7 @@ import com.llama.hub.mapper.CallLogMapper;
 import com.llama.hub.model.ApiKey;
 import com.llama.hub.model.AuditLog;
 import com.llama.hub.model.CallLog;
+import com.llama.hub.model.DailyStatsInfo;
 import com.llama.hub.model.DashboardInfo;
 import com.llama.hub.model.KeyCreateResult;
 import com.llama.hub.model.KeyInfo;
@@ -73,6 +74,13 @@ public class AdminController {
                                      @RequestParam(required = false) String startAt,
                                      @RequestParam(required = false) String endAt) {
         return statsService.usageStats(keyId, parseStart(startAt), parseEnd(endAt));
+    }
+
+    @GetMapping("/api/admin/stats/daily")
+    public DailyStatsInfo dailyStats(@RequestParam(required = false) Long keyId,
+                                     @RequestParam(required = false) String startAt,
+                                     @RequestParam(required = false) String endAt) {
+        return statsService.dailyStats(keyId, parseStart(startAt), parseEnd(endAt));
     }
 
     // ---------- api keys ----------

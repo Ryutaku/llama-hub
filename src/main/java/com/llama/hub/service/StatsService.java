@@ -1,7 +1,9 @@
 package com.llama.hub.service;
 
 import com.llama.hub.mapper.StatsMapper;
+import com.llama.hub.model.DailyStatsInfo;
 import com.llama.hub.model.DashboardInfo;
+import com.llama.hub.model.DayUsageRowVO;
 import com.llama.hub.model.TrendRowVO;
 import com.llama.hub.model.TodayStatsVO;
 import com.llama.hub.model.UsageRowVO;
@@ -22,6 +24,11 @@ import java.util.Map;
 public class StatsService {
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("MM-dd");
+
+    private static final DateTimeFormatter ISO_DATE = DateTimeFormatter.ISO_LOCAL_DATE;
+
+    /** 每日用量补零区间上限（天） */
+    private static final int DAILY_MAX_DAYS = 366;
 
     private final StatsMapper statsMapper;
     private final UpstreamHealthService healthService;
@@ -112,6 +119,58 @@ public class StatsService {
                 : null);
 
         UsageStatsInfo m = new UsageStatsInfo();
+        m.setItems(items);
+        m.setTotal(total);
+        return m;
+    }
+
+    /** 按日聚合的每日用量（[keyId 为 null 时聚合所有 Key]，缺失日期补零，区间上限 366 天） */
+    public DailyStatsInfo dailyStats(Long keyId, LocalDateTime start, LocalDateTime end) {
+        LocalDate endDate = (end == null ? LocalDate.now() : end.toLocalDate());
+        if (end != null && end.toLocalTime().equals(java.time.LocalTime.MIDNIGHT)) {
+            // parseEnd 返回的是次日零点（开区间），回退到实际结束日
+            endDate = endDate.minusDays(1);
+        }
+        LocalDate startDate = (start == null ? endDate.minusDays(29) : start.toLocalDate());
+        if (startDate.isBefore(endDate.minusDays(DAILY_MAX_DAYS - 1L))) {
+            startDate = endDate.minusDays(DAILY_MAX_DAYS - 1L);
+        }
+
+        List<DayUsageRowVO> rows = statsMapper.usageByDay(keyId,
+                startDate.atStartOfDay(), endDate.plusDays(1).atStartOfDay());
+        Map<LocalDate, DayUsageRowVO> byDate = new LinkedHashMap<>();
+        for (DayUsageRowVO row : rows) {
+            byDate.put(row.getD(), row);
+        }
+
+        DailyStatsInfo.Total total = new DailyStatsInfo.Total();
+        List<DailyStatsInfo.Item> items = new ArrayList<>();
+        for (LocalDate d = startDate; !d.isAfter(endDate); d = d.plusDays(1)) {
+            DayUsageRowVO row = byDate.get(d);
+            DailyStatsInfo.Item item = new DailyStatsInfo.Item();
+            item.setDate(ISO_DATE.format(d));
+            item.setCount(row == null ? 0 : row.getCount());
+            item.setPromptTokens(row == null ? 0 : row.getPrompt());
+            item.setCompletionTokens(row == null ? 0 : row.getCompletion());
+            item.setTotalTokens(row == null ? 0 : row.getTotal());
+            item.setCachedTokens(row == null ? 0 : row.getCached());
+            item.setCacheHitRate(row == null || row.getPrompt() <= 0 ? null
+                    : BigDecimal.valueOf(row.getCached() * 100.0 / row.getPrompt()).setScale(2, RoundingMode.HALF_UP));
+            item.setErrors(row == null ? 0 : row.getErrors());
+            items.add(item);
+
+            total.setCount(total.getCount() + item.getCount());
+            total.setPromptTokens(total.getPromptTokens() + item.getPromptTokens());
+            total.setCompletionTokens(total.getCompletionTokens() + item.getCompletionTokens());
+            total.setTotalTokens(total.getTotalTokens() + item.getTotalTokens());
+            total.setCachedTokens(total.getCachedTokens() + item.getCachedTokens());
+            total.setErrors(total.getErrors() + item.getErrors());
+        }
+        total.setCacheHitRate(total.getPromptTokens() > 0
+                ? BigDecimal.valueOf(total.getCachedTokens() * 100.0 / total.getPromptTokens()).setScale(2, RoundingMode.HALF_UP)
+                : null);
+
+        DailyStatsInfo m = new DailyStatsInfo();
         m.setItems(items);
         m.setTotal(total);
         return m;

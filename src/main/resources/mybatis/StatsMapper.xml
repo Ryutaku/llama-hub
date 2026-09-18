@@ -69,4 +69,27 @@
         ORDER BY "count" DESC
     </select>
 
+    <select id="usageByDay" resultType="com.llama.hub.model.DayUsageRowVO">
+        SELECT CAST(started_at AS DATE) AS "d",
+               COUNT(*) AS "count",
+               COALESCE(SUM(prompt_tokens), 0) AS "prompt",
+               COALESCE(SUM(completion_tokens), 0) AS "completion",
+               COALESCE(SUM(total_tokens), 0) AS "total",
+               COALESCE(SUM(cached_tokens), 0) AS "cached",
+               SUM(CASE WHEN status_code IS NOT NULL AND status_code >= 400 THEN 1 ELSE 0 END) AS "errors"
+        FROM call_log
+        WHERE 1 = 1
+        <if test="keyId != null and keyId > 0">
+            AND key_id = #{keyId}
+        </if>
+        <if test="start != null">
+            AND started_at <![CDATA[>=]]> #{start}
+        </if>
+        <if test="end != null">
+            AND started_at <![CDATA[<]]> #{end}
+        </if>
+        GROUP BY CAST(started_at AS DATE)
+        ORDER BY "d" ASC
+    </select>
+
 </mapper>

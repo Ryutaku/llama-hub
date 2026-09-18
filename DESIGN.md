@@ -120,6 +120,14 @@
 - **Top 5 活跃 Key**：按今日请求数排序
 - **上游状态**：llama-server 存活指示（绿/红）
 
+### 用量统计（Tab）
+
+管理界面"用量统计" Tab，内含三个子页签，数据均来自 `call_log` 聚合，均支持日期区间筛选（`startAt`/`endAt`，日期粒度，endAt 含当天）：
+
+- **Key 用量**（既有）：按 Key 聚合区间内请求数 / tokens / 命中率 / 速度 / 错误数，接口 `GET /api/admin/stats/usage`
+- **每日用量**（新增）：按日期聚合区间内每日请求数、总/输入/输出/缓存 tokens、命中率、错误数，并附 Token 趋势条（按区间内最大日 Token 量等比渲染）；缺失日期补零行（区间上限 366 天，超出截取最近 366 天）；可选按 Key 过滤。接口 `GET /api/admin/stats/daily`
+- **成员用量**（新增）：成员即 API Key（Key 名称即成员名），复用 `GET /api/admin/stats/usage` 数据，前端按总 Token 降序生成排名，展示请求次数、总/输入/输出/缓存 tokens、命中率与占比条（占区间总量百分比）。不展示费用/推理 Token（网关无计费与 reasoning tokens 字段）
+
 ### 上游健康检查
 
 - 定时任务每 30 秒探测上游 `/health`（2 秒超时）
@@ -155,6 +163,7 @@
     - 默认按时间倒序，分页 50 条
     - 行展开：查看请求/响应体（开关开启时）与错误信息
     - 导出 CSV 按钮（按当前筛选条件）
+  - **用量统计**：三个子页签 —— Key 用量（按 Key 聚合明细表）、每日用量（按日聚合表 + Token 趋势条）、成员用量（按 Key 的 Token 消耗排名 + 占比条）
   - **审计日志**：操作记录列表，分页
 - **新建 Key 弹窗**：名称 + 有效期（数量 + 单位）+ 限额（tokens / 次数，可留空不限）
 - **修改密码弹窗**（右上角用户菜单）：旧密码 + 新密码 + 确认新密码
@@ -234,7 +243,8 @@ CREATE INDEX idx_audit_log_time ON audit_log(created_at DESC);
 | POST | `/api/logout` | 登出 |
 | PUT | `/api/admin/password` | 修改密码 `{oldPassword, newPassword}`（成功后 Session 失效，需重新登录） |
 | GET | `/api/admin/dashboard` | 仪表盘数据（今日统计 + 近 7 天趋势 + Top 5 Key + 上游状态） |
-| GET | `/api/admin/stats/usage` | 按 Key + 日期区间统计 token 用量 `{keyId?, startAt?, endAt?}` |
+| GET | `/api/admin/stats/usage` | 按 Key + 日期区间统计 token 用量 `{keyId?, startAt?, endAt?}`（成员用量排名复用此接口） |
+| GET | `/api/admin/stats/daily` | 按日聚合的每日用量 `{keyId?, startAt?, endAt?}`（缺失日期补零） |
 | GET | `/api/admin/upstream/status` | 上游健康状态（缓存值，前端轮询 30s） |
 | GET | `/api/admin/keys` | Key 列表（含用量 `tokensUsed/requestsUsed/quota`） |
 | POST | `/api/admin/keys` | 创建 Key `{name, number, unit, tokenQuota?, requestQuota?}` |

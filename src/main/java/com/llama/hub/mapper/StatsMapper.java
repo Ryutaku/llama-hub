@@ -1,6 +1,7 @@
 package com.llama.hub.mapper;
 
 import com.llama.hub.model.DashboardInfo;
+import com.llama.hub.model.DayUsageRowVO;
 import com.llama.hub.model.TrendRowVO;
 import com.llama.hub.model.TodayStatsVO;
 import com.llama.hub.model.UsageRowVO;
@@ -25,4 +26,8 @@ public interface StatsMapper {
     List<UsageRowVO> usageByKey(@Param("keyId") Long keyId,
                                 @Param("start") LocalDateTime start,
                                 @Param("end") LocalDateTime end);
+
+    List<DayUsageRowVO> usageByDay(@Param("keyId") Long keyId,
+                                   @Param("start") LocalDateTime start,
+                                   @Param("end") LocalDateTime end);
 }
