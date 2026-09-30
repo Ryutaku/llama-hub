@@ -60,8 +60,8 @@ public class AdminController {
     // ---------- dashboard ----------
 
     @GetMapping("/api/admin/dashboard")
-    public DashboardInfo dashboard() {
-        return statsService.dashboard();
+    public DashboardInfo dashboard(@RequestParam(defaultValue = "14") Integer days) {
+        return statsService.dashboard(days);
     }
 
     @GetMapping("/api/admin/upstream/status")

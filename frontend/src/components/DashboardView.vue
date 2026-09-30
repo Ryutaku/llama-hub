@@ -14,6 +14,9 @@ const loading = ref(true)
 const error = ref('')
 const data = ref(null)
 
+const TREND_OPTIONS = [7, 14, 30, 90]
+const trendDays = ref(14)
+
 function useCountUp(duration = 900) {
   const display = ref(0)
   let raf = null
@@ -66,7 +69,7 @@ const barsIn = ref(false)
 
 async function load() {
   try {
-    data.value = await api.dashboard()
+    data.value = await api.dashboard({ days: trendDays.value })
     error.value = ''
     barsIn.value = false
     await nextTick()
@@ -75,6 +78,12 @@ async function load() {
     error.value = e.message
   }
   loading.value = false
+}
+
+function setTrendDays(n) {
+  if (trendDays.value === n) return
+  trendDays.value = n
+  load()
 }
 
 onMounted(load)
@@ -104,7 +113,8 @@ const AXES = {
     axisTick: { show: false },
     axisLabel: { color: '#7e90a9', fontSize: 10, fontFamily: 'monospace' }
   },
-  grid: { left: 4, right: 8, top: 14, bottom: 4, containLabel: true }
+  grid: { left: 4, right: 8, top: 14, bottom: 4, containLabel: true },
+  dataZoom: [{ type: 'inside', filterMode: 'weakFilter' }]
 }
 
 function baseTooltip(unit, fmt) {
@@ -257,21 +267,35 @@ const tokChartOption = computed(() => {
       <div class="panel-tech p-3.5 dash-card" style="animation-delay: 220ms">
         <div class="flex items-center gap-2 text-sm text-gh-muted mb-2">
           <i class="fa-solid fa-chart-line mr-1.5 text-gh-cyan"></i>
-          近 14 天请求量
+          近 {{ trendDays }} 天请求量
+          <div class="ml-auto flex items-center gap-1">
+            <button v-for="n in TREND_OPTIONS" :key="n" @click="setTrendDays(n)"
+              class="px-1.5 py-0.5 rounded text-[10px] font-mono transition-colors cursor-pointer"
+              :class="trendDays === n ? 'text-gh-cyan bg-gh-tag ring-1 ring-gh-cyan/30' : 'text-gh-muted hover:text-gh-text'">
+              {{ n }}天
+            </button>
+          </div>
         </div>
         <EChart v-if="hasTrend" :option="reqChartOption" height="200px" />
         <div v-else class="h-[200px] flex items-center justify-center text-gh-muted text-sm">
-          近 14 天暂无数据
+          近 {{ trendDays }} 天暂无数据
         </div>
       </div>
       <div class="panel-tech p-3.5 dash-card" style="animation-delay: 280ms">
         <div class="flex items-center gap-2 text-sm text-gh-muted mb-2">
           <i class="fa-solid fa-coins mr-1.5 text-gh-green"></i>
-          近 14 天 Tokens 消耗
+          近 {{ trendDays }} 天 Tokens 消耗
+          <div class="ml-auto flex items-center gap-1">
+            <button v-for="n in TREND_OPTIONS" :key="n" @click="setTrendDays(n)"
+              class="px-1.5 py-0.5 rounded text-[10px] font-mono transition-colors cursor-pointer"
+              :class="trendDays === n ? 'text-gh-cyan bg-gh-tag ring-1 ring-gh-cyan/30' : 'text-gh-muted hover:text-gh-text'">
+              {{ n }}天
+            </button>
+          </div>
         </div>
         <EChart v-if="hasTrend" :option="tokChartOption" height="200px" />
         <div v-else class="h-[200px] flex items-center justify-center text-gh-muted text-sm">
-          近 14 天暂无数据
+          近 {{ trendDays }} 天暂无数据
         </div>
       </div>
     </div>

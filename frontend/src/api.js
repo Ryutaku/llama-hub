@@ -87,7 +87,7 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ oldPassword, newPassword })
     }),
-  dashboard: () => request('/api/admin/dashboard'),
+  dashboard: (params) => request(`/api/admin/dashboard?${qs(params)}`),
   usageStats: (params) => request(`/api/admin/stats/usage?${qs(params)}`),
   dailyStats: (params) => request(`/api/admin/stats/daily?${qs(params)}`),
   upstreamStatus: () => request('/api/admin/upstream/status'),

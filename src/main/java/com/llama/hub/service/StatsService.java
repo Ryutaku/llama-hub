@@ -38,7 +38,9 @@ public class StatsService {
         this.healthService = healthService;
     }
 
-    public DashboardInfo dashboard() {
+    /** 仪表盘（[days 为趋势天数，1..366]，缺失日期补零） */
+    public DashboardInfo dashboard(int days) {
+        days = Math.max(1, Math.min(DAILY_MAX_DAYS, days));
         LocalDateTime today = LocalDate.now().atStartOfDay();
         DashboardInfo m = new DashboardInfo();
 
@@ -50,14 +52,14 @@ public class StatsService {
                 : null);
         m.setActiveKeys(statsMapper.countActiveKeys(today));
 
-        // 近 14 天趋势（缺失日期补零）
-        LocalDate start = LocalDate.now().minusDays(13);
+        // 近 N 天趋势（缺失日期补零）
+        LocalDate start = LocalDate.now().minusDays(days - 1L);
         Map<String, TrendRowVO> byDate = new LinkedHashMap<>();
         for (TrendRowVO row : statsMapper.trendByDay(start.atStartOfDay())) {
             byDate.put(row.getD().toString(), row);
         }
         List<DashboardInfo.TrendPoint> trend = new ArrayList<>();
-        for (int i = 0; i < 14; i++) {
+        for (int i = 0; i < days; i++) {
             LocalDate d = start.plusDays(i);
             TrendRowVO row = byDate.get(d.toString());
             DashboardInfo.TrendPoint day = new DashboardInfo.TrendPoint();
