@@ -257,21 +257,21 @@ const tokChartOption = computed(() => {
       <div class="panel-tech p-3.5 dash-card" style="animation-delay: 220ms">
         <div class="flex items-center gap-2 text-sm text-gh-muted mb-2">
           <i class="fa-solid fa-chart-line mr-1.5 text-gh-cyan"></i>
-          近 7 天请求量
+          近 14 天请求量
         </div>
         <EChart v-if="hasTrend" :option="reqChartOption" height="200px" />
         <div v-else class="h-[200px] flex items-center justify-center text-gh-muted text-sm">
-          近 7 天暂无数据
+          近 14 天暂无数据
         </div>
       </div>
       <div class="panel-tech p-3.5 dash-card" style="animation-delay: 280ms">
         <div class="flex items-center gap-2 text-sm text-gh-muted mb-2">
           <i class="fa-solid fa-coins mr-1.5 text-gh-green"></i>
-          近 7 天 Tokens 消耗
+          近 14 天 Tokens 消耗
         </div>
         <EChart v-if="hasTrend" :option="tokChartOption" height="200px" />
         <div v-else class="h-[200px] flex items-center justify-center text-gh-muted text-sm">
-          近 7 天暂无数据
+          近 14 天暂无数据
         </div>
       </div>
     </div>

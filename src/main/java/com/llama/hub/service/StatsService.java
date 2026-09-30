@@ -50,14 +50,14 @@ public class StatsService {
                 : null);
         m.setActiveKeys(statsMapper.countActiveKeys(today));
 
-        // 近 7 天趋势（缺失日期补零）
-        LocalDate start = LocalDate.now().minusDays(6);
+        // 近 14 天趋势（缺失日期补零）
+        LocalDate start = LocalDate.now().minusDays(13);
         Map<String, TrendRowVO> byDate = new LinkedHashMap<>();
         for (TrendRowVO row : statsMapper.trendByDay(start.atStartOfDay())) {
             byDate.put(row.getD().toString(), row);
         }
         List<DashboardInfo.TrendPoint> trend = new ArrayList<>();
-        for (int i = 0; i < 7; i++) {
+        for (int i = 0; i < 14; i++) {
             LocalDate d = start.plusDays(i);
             TrendRowVO row = byDate.get(d.toString());
             DashboardInfo.TrendPoint day = new DashboardInfo.TrendPoint();
