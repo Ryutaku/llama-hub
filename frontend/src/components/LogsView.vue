@@ -138,12 +138,13 @@ function toggle(row) {
     <p v-if="error" class="text-gh-red text-sm mb-3">{{ error }}</p>
 
     <div class="panel-tech overflow-x-auto">
-      <table class="w-full min-w-[1000px] text-sm">
+      <table class="w-full min-w-[1120px] text-sm">
         <thead>
           <tr class="border-b border-gh-border bg-gh-tag/60 text-left text-xs text-gh-muted">
             <th class="px-3 py-2">时间</th>
             <th class="px-3 py-2">Key</th>
             <th class="px-3 py-2">端点</th>
+            <th class="px-3 py-2">模型名称</th>
             <th class="px-3 py-2 text-right">总 tok</th>
             <th class="px-3 py-2 text-right">入 tok</th>
             <th class="px-3 py-2 text-right">出 tok</th>
@@ -156,13 +157,14 @@ function toggle(row) {
         </thead>
         <tbody>
           <tr v-if="!loading && logs.length === 0">
-            <td colspan="11" class="px-4 py-10 text-center text-gh-muted">暂无日志</td>
+            <td colspan="12" class="px-4 py-10 text-center text-gh-muted">暂无日志</td>
           </tr>
           <template v-for="l in logs" :key="l.id">
             <tr class="border-b border-gh-border/40 hover:bg-gh-cyan/5 active:bg-gh-cyan/10 cursor-pointer transition-colors" @click="toggle(l)">
               <td class="px-3 py-1.5 text-xs text-gh-muted font-mono whitespace-nowrap">{{ fmtTime(l.startedAt) }}</td>
               <td class="px-3 py-1.5 text-xs">{{ l.keyName }}</td>
               <td class="px-3 py-1.5 text-xs font-mono text-gh-muted">{{ l.endpoint }}</td>
+              <td class="px-3 py-1.5 text-xs font-mono whitespace-nowrap">{{ l.model || '—' }}</td>
               <td class="px-3 py-1.5 text-right font-mono text-xs">{{ fmtTok(l.totalTokens) }}</td>
               <td class="px-3 py-1.5 text-right font-mono text-xs">{{ fmtTok(l.promptTokens) }}</td>
               <td class="px-3 py-1.5 text-right font-mono text-xs">{{ fmtTok(l.completionTokens) }}</td>
@@ -175,7 +177,7 @@ function toggle(row) {
               </td>
             </tr>
             <tr v-if="expanded === l.id" class="border-b border-gh-border bg-gh-cyan/[0.04]">
-              <td colspan="11" class="px-3 py-3">
+              <td colspan="12" class="px-3 py-3">
                 <div class="text-xs text-gh-muted mb-1">模型：<span class="text-gh-text font-mono">{{ l.model || '—' }}</span></div>
                 <div v-if="l.errorMsg" class="text-xs mb-2">错误信息：<span class="text-gh-red font-mono break-all">{{ l.errorMsg }}</span></div>
                 <div v-if="l.requestBody" class="mb-2">
